@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, screen, dialog } from "electron";
 import fs from "fs";
 import path from "path";
 import { runPipeline } from "./pipeline";
+import { spawn } from "child_process";
 import { saveUrlSet, listTopics } from "./urlSets";
 import { loadLatestManifest } from "./manifest";
 import { listRuns } from "./runs";
@@ -190,6 +191,20 @@ ipcMain.handle("video:pickFinal", async () => {
   return { path: result.filePaths[0] };
 });
 
+// Pick a voice prompt WAV for TTS
+ipcMain.handle("tts:pickPrompt", async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Select voice sample (WAV)",
+    properties: ["openFile"],
+    filters: [
+      { name: "Audio", extensions: ["wav"] }
+    ]
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return { path: result.filePaths[0] };
+});
+
 ipcMain.handle("video:listRuns", async () => {
   return listRuns();
 });
@@ -237,4 +252,69 @@ ipcMain.handle("video:buildFinalFromSelected", async (_event, args) => {
     maxDurationSeconds: number;
   };
   return buildFinalFromPlaylist(topic, items, maxClipSeconds, maxDurationSeconds);
+});
+
+// Text-to-Speech: run Chatterbox Turbo via Python helper script
+ipcMain.handle("tts:generate", async (_event, args: { text: string; outputPath?: string; promptPath?: string | null; exaggeration?: number; cfgWeight?: number }) => {
+  const { text, outputPath, promptPath, exaggeration, cfgWeight } = args;
+
+  let outPath = outputPath && outputPath.trim().length > 0
+    ? outputPath
+    : path.join(process.cwd(), "out", "tts-output.wav");
+
+  // If using default path, auto-increment to avoid overwriting previous generations
+  if (!outputPath || !outputPath.trim().length) {
+    const outDirDefault = path.dirname(outPath);
+    const baseName = path.basename(outPath, path.extname(outPath));
+    const ext = path.extname(outPath) || ".wav";
+    let idx = 1;
+    while (fs.existsSync(outPath)) {
+      outPath = path.join(outDirDefault, `${baseName} (${idx})${ext}`);
+      idx += 1;
+    }
+  }
+
+  const outDir = path.dirname(outPath);
+  if (!fs.existsSync(outDir)) {
+    fs.mkdirSync(outDir, { recursive: true });
+  }
+
+  return new Promise<{ outputPath: string }>((resolve, reject) => {
+    const pythonExe = "python"; // uses system default Python (3.11)
+    const scriptPath = path.join(process.cwd(), "tts_chatterbox_turbo.py");
+
+    const argsList = [scriptPath, text, outPath];
+    if (promptPath && promptPath.trim().length > 0) {
+      argsList.push("--prompt", promptPath);
+    }
+    if (typeof exaggeration === "number") {
+      argsList.push("--exaggeration", String(exaggeration));
+    }
+    if (typeof cfgWeight === "number") {
+      argsList.push("--cfg_weight", String(cfgWeight));
+    }
+
+    const env = { ...process.env };
+    // Expect HF_TOKEN to be provided via environment; do not hardcode secrets here.
+
+    const child = spawn(pythonExe, argsList, {
+      cwd: process.cwd(),
+      env,
+    });
+
+    child.stdout.on("data", (data) => {
+      console.log("[TTS stdout]", data.toString());
+    });
+    child.stderr.on("data", (data) => {
+      console.error("[TTS stderr]", data.toString());
+    });
+
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve({ outputPath: outPath });
+      } else {
+        reject(new Error(`TTS process exited with code ${code}`));
+      }
+    });
+  });
 });

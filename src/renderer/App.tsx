@@ -39,6 +39,17 @@ export const App: React.FC = () => {
   const [loopSelected, setLoopSelected] = useState(true);
   const [selectedForFinal, setSelectedForFinal] = useState<SelectedVideoForFinal[]>([]);
 
+  // TTS
+  type TtsStyle = "calm" | "natural" | "hype";
+  const [ttsText, setTtsText] = useState("");
+  const [ttsOutputPath, setTtsOutputPath] = useState<string | null>(null);
+  const [ttsRunning, setTtsRunning] = useState(false);
+  const [ttsPromptPath, setTtsPromptPath] = useState<string | null>(null);
+  const [ttsStyle, setTtsStyle] = useState<TtsStyle>("natural");
+  const [ttsManualStyle, setTtsManualStyle] = useState(false);
+  const [ttsExaggeration, setTtsExaggeration] = useState(1.0);
+  const [ttsCfgWeight, setTtsCfgWeight] = useState(2.0);
+
   const logContainerRef = useRef<HTMLDivElement | null>(null);
   const autoScrollRef = useRef(true);
 
@@ -155,6 +166,46 @@ export const App: React.FC = () => {
       if (prev.some((item) => item.path === path)) return prev;
       return [...prev, { path, label }];
     });
+  };
+
+  const handleTtsGenerate = async () => {
+    if (!ttsText.trim()) return;
+    setTtsRunning(true);
+
+    // Default style from presets
+    const styleParams: Record<TtsStyle, { exaggeration: number; cfg: number }> = {
+      calm: { exaggeration: 0.85, cfg: 1.5 },
+      natural: { exaggeration: 1.0, cfg: 2.0 },
+      hype: { exaggeration: 1.3, cfg: 2.5 },
+    };
+
+    let exaggeration: number;
+    let cfg: number;
+
+    if (ttsManualStyle) {
+      exaggeration = ttsExaggeration;
+      cfg = ttsCfgWeight;
+    } else {
+      const preset = styleParams[ttsStyle];
+      exaggeration = preset.exaggeration;
+      cfg = preset.cfg;
+    }
+
+    try {
+      const result = await window.api.ttsGenerate({
+        text: ttsText.trim(),
+        outputPath: "",
+        promptPath: ttsPromptPath,
+        exaggeration,
+        cfgWeight: cfg,
+      });
+      setTtsOutputPath(result.outputPath);
+      setLog((prev) => [...prev, `[TTS] Generated: ${result.outputPath}`]);
+    } catch (err: any) {
+      setLog((prev) => [...prev, `[TTS ERROR] ${err.message || String(err)}`]);
+    } finally {
+      setTtsRunning(false);
+    }
   };
 
   const handleBuildFinalFromSelected = async () => {
@@ -551,6 +602,114 @@ export const App: React.FC = () => {
                     <option>None (Mute)</option>
                   </select>
                 </div>
+
+                {/* Text to Speech (Pro layout) */}
+                <div className="mt-4">
+                  <label>Text to Speech</label>
+                  <textarea
+                    rows={3}
+                    placeholder="Type narration text here..."
+                    value={ttsText}
+                    onChange={(e) => setTtsText(e.target.value)}
+                    style={{ width: "100%", boxSizing: "border-box", borderRadius: 8, border: "1px solid #e2e8f0", padding: "8px 12px", fontSize: 13, resize: "vertical" }}
+                  />
+                  <div style={{ marginTop: 8, fontSize: 11 }}>
+                    <span style={{ display: "block", marginBottom: 4 }}>Voice sample (optional):</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const result = await window.api.ttsPickPrompt();
+                          if (result && result.path) {
+                            setTtsPromptPath(result.path);
+                            setLog((prev) => [...prev, `[TTS] Using prompt: ${result.path}`]);
+                          }
+                        }}
+                        style={{ background: "#f1f5f9", color: "#475569", border: "none", padding: "6px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer" }}
+                      >
+                        Browse WAV
+                      </button>
+                      <code style={{ fontSize: 10, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {ttsPromptPath || "None"}
+                      </code>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 8 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                      <input
+                        type="checkbox"
+                        style={{ width: "auto" }}
+                        checked={ttsManualStyle}
+                        onChange={(e) => setTtsManualStyle(e.target.checked)}
+                      />
+                      Manual style controls
+                    </label>
+                  </div>
+
+                  {!ttsManualStyle && (
+                    <div style={{ marginTop: 8 }}>
+                      <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Voice style</label>
+                      <select
+                        value={ttsStyle}
+                        onChange={(e) => setTtsStyle(e.target.value as TtsStyle)}
+                        style={{ width: "100%", borderRadius: 8, border: "1px solid #e2e8f0", padding: "6px 10px", fontSize: 12 }}
+                      >
+                        <option value="calm">Calm narrator</option>
+                        <option value="natural">Natural</option>
+                        <option value="hype">Hype / TikTok</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {ttsManualStyle && (
+                    <div style={{ marginTop: 8, fontSize: 11 }}>
+                      <div style={{ marginBottom: 8 }}>
+                        <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 2 }}>Exaggeration ({ttsExaggeration.toFixed(2)})</label>
+                        <input
+                          type="range"
+                          min={0.5}
+                          max={2.0}
+                          step={0.05}
+                          value={ttsExaggeration}
+                          onChange={(e) => setTtsExaggeration(Number(e.target.value))}
+                          style={{
+                            width: "100%",
+                            background: `linear-gradient(to right, #2563eb ${((ttsExaggeration - 0.5) / (2.0 - 0.5)) * 100}%, #e2e8f0 ${((ttsExaggeration - 0.5) / (2.0 - 0.5)) * 100}%)`,
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 2 }}>CFG weight ({ttsCfgWeight.toFixed(2)})</label>
+                        <input
+                          type="range"
+                          min={0.5}
+                          max={3.0}
+                          step={0.05}
+                          value={ttsCfgWeight}
+                          onChange={(e) => setTtsCfgWeight(Number(e.target.value))}
+                          style={{
+                            width: "100%",
+                            background: `linear-gradient(to right, #2563eb ${((ttsCfgWeight - 0.5) / (3.0 - 0.5)) * 100}%, #e2e8f0 ${((ttsCfgWeight - 0.5) / (3.0 - 0.5)) * 100}%)`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleTtsGenerate}
+                    disabled={!ttsText.trim() || ttsRunning}
+                    style={{ marginTop: 8, width: "100%", background: "#2563eb", color: "white", border: "none", padding: "8px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                  >
+                    {ttsRunning ? "Generating voice..." : "Generate Voice"}
+                  </button>
+                  {ttsOutputPath && (
+                    <div style={{ marginTop: 6, fontSize: 11, color: "#64748b" }}>
+                      Output: <code>{ttsOutputPath}</code>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -850,6 +1009,114 @@ export const App: React.FC = () => {
                     <option>Upbeat Pop</option>
                     <option>None (Mute)</option>
                   </select>
+                </div>
+
+                {/* Text to Speech (Classic) */}
+                <div style={{ marginTop: 16 }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Text to Speech</label>
+                  <textarea
+                    rows={3}
+                    placeholder="Type narration text here..."
+                    value={ttsText}
+                    onChange={(e) => setTtsText(e.target.value)}
+                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 13, resize: "vertical" }}
+                  />
+                  <div style={{ marginTop: 8, fontSize: 11 }}>
+                    <span style={{ display: "block", marginBottom: 4 }}>Voice sample (optional):</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const result = await window.api.ttsPickPrompt();
+                          if (result && result.path) {
+                            setTtsPromptPath(result.path);
+                            setLog((prev) => [...prev, `[TTS] Using prompt: ${result.path}`]);
+                          }
+                        }}
+                        style={{ background: "#f1f5f9", color: "#475569", border: "none", padding: "6px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer" }}
+                      >
+                        Browse WAV
+                      </button>
+                      <code style={{ fontSize: 10, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {ttsPromptPath || "None"}
+                      </code>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 8 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                      <input
+                        type="checkbox"
+                        style={{ width: "auto" }}
+                        checked={ttsManualStyle}
+                        onChange={(e) => setTtsManualStyle(e.target.checked)}
+                      />
+                      Manual style controls
+                    </label>
+                  </div>
+
+                  {!ttsManualStyle && (
+                    <div style={{ marginTop: 8 }}>
+                      <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Voice style</label>
+                      <select
+                        value={ttsStyle}
+                        onChange={(e) => setTtsStyle(e.target.value as TtsStyle)}
+                        style={{ width: "100%", borderRadius: 8, border: "1px solid #e2e8f0", padding: "6px 10px", fontSize: 12 }}
+                      >
+                        <option value="calm">Calm narrator</option>
+                        <option value="natural">Natural</option>
+                        <option value="hype">Hype / TikTok</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {ttsManualStyle && (
+                    <div style={{ marginTop: 8, fontSize: 11 }}>
+                      <div style={{ marginBottom: 8 }}>
+                        <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 2 }}>Exaggeration ({ttsExaggeration.toFixed(2)})</label>
+                        <input
+                          type="range"
+                          min={0.5}
+                          max={2.0}
+                          step={0.05}
+                          value={ttsExaggeration}
+                          onChange={(e) => setTtsExaggeration(Number(e.target.value))}
+                          style={{
+                            width: "100%",
+                            background: `linear-gradient(to right, #2563eb ${((ttsExaggeration - 0.5) / (2.0 - 0.5)) * 100}%, #e2e8f0 ${((ttsExaggeration - 0.5) / (2.0 - 0.5)) * 100}%)`,
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 2 }}>CFG weight ({ttsCfgWeight.toFixed(2)})</label>
+                        <input
+                          type="range"
+                          min={0.5}
+                          max={3.0}
+                          step={0.05}
+                          value={ttsCfgWeight}
+                          onChange={(e) => setTtsCfgWeight(Number(e.target.value))}
+                          style={{
+                            width: "100%",
+                            background: `linear-gradient(to right, #2563eb ${((ttsCfgWeight - 0.5) / (3.0 - 0.5)) * 100}%, #e2e8f0 ${((ttsCfgWeight - 0.5) / (3.0 - 0.5)) * 100}%)`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleTtsGenerate}
+                    disabled={!ttsText.trim() || ttsRunning}
+                    style={{ marginTop: 8, width: "100%", background: "#2563eb", color: "white", border: "none", padding: "8px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                  >
+                    {ttsRunning ? "Generating voice..." : "Generate Voice"}
+                  </button>
+                  {ttsOutputPath && (
+                    <div style={{ marginTop: 6, fontSize: 11, color: "#64748b" }}>
+                      Output: <code>{ttsOutputPath}</code>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
