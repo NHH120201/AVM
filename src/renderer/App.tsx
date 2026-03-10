@@ -50,6 +50,13 @@ export const App: React.FC = () => {
   const [ttsExaggeration, setTtsExaggeration] = useState(1.0);
   const [ttsCfgWeight, setTtsCfgWeight] = useState(2.0);
 
+  // Narration selection for final video (Classic only)
+  type NarrationMode = "none" | "generated" | "manual";
+  const [narrationMode, setNarrationMode] = useState<NarrationMode>("none");
+  const [generatedVoices, setGeneratedVoices] = useState<{ label: string; path: string }[]>([]);
+  const [selectedGeneratedVoice, setSelectedGeneratedVoice] = useState<string | null>(null);
+  const [manualNarrationPath, setManualNarrationPath] = useState<string | null>(null);
+
   const logContainerRef = useRef<HTMLDivElement | null>(null);
   const autoScrollRef = useRef(true);
 
@@ -68,6 +75,18 @@ export const App: React.FC = () => {
         setTopicTag(topics[0]);
       }
     });
+
+    // Initial load of generated voices list (for Classic narration selector)
+    window.api.listGeneratedVoices?.()
+      .then((voices) => {
+        if (Array.isArray(voices)) {
+          setGeneratedVoices(voices);
+          if (!selectedGeneratedVoice && voices.length > 0) {
+            setSelectedGeneratedVoice(voices[voices.length - 1].path);
+          }
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -201,6 +220,19 @@ export const App: React.FC = () => {
       });
       setTtsOutputPath(result.outputPath);
       setLog((prev) => [...prev, `[TTS] Generated: ${result.outputPath}`]);
+
+      // Refresh generated voices list so new file appears in the Classic narration dropdown
+      try {
+        const voices = await window.api.listGeneratedVoices?.();
+        if (Array.isArray(voices)) {
+          setGeneratedVoices(voices);
+          if (voices.length > 0) {
+            setSelectedGeneratedVoice(voices[voices.length - 1].path);
+          }
+        }
+      } catch {
+        // ignore
+      }
     } catch (err: any) {
       setLog((prev) => [...prev, `[TTS ERROR] ${err.message || String(err)}`]);
     } finally {
@@ -217,11 +249,19 @@ export const App: React.FC = () => {
     const maxClip = playlistMaxClipSeconds > 0 ? playlistMaxClipSeconds : 10;
     const maxDuration = playlistMaxDurationSeconds > 0 ? playlistMaxDurationSeconds : 60;
 
+    let narrationAudioPath: string | null = null;
+    if (narrationMode === "generated" && selectedGeneratedVoice) {
+      narrationAudioPath = selectedGeneratedVoice;
+    } else if (narrationMode === "manual" && manualNarrationPath) {
+      narrationAudioPath = manualNarrationPath;
+    }
+
     const result = await window.api.buildFinalFromSelected({
       topic,
       items: selectedForFinal,
       maxClipSeconds: maxClip,
       maxDurationSeconds: maxDuration,
+      narrationAudioPath,
     });
 
     setFinalPath(result.outputPath);
@@ -970,6 +1010,79 @@ export const App: React.FC = () => {
                 <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 400, cursor: "pointer" }}>
                   <input type="checkbox" style={{ width: "auto" }} checked={loopSelected} onChange={(e) => setLoopSelected(e.target.checked)} /> Loop Preview
                 </label>
+
+                {/* Narration selection for final video (Classic layout, under preview) */}
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px dashed #e2e8f0", fontSize: 12 }}>
+                  <div style={{ marginBottom: 6, fontWeight: 600 }}>Narration for Final Video</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <input
+                        type="radio"
+                        style={{ width: "auto" }}
+                        checked={narrationMode === "none"}
+                        onChange={() => setNarrationMode("none")}
+                      />
+                      No narration (mute)
+                    </label>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <input
+                          type="radio"
+                          style={{ width: "auto" }}
+                          checked={narrationMode === "generated"}
+                          onChange={() => setNarrationMode("generated")}
+                        />
+                        Use generated voice from this tool
+                      </label>
+                      <div style={{ marginLeft: 20, display: "flex", gap: 6, alignItems: "center" }}>
+                        <select
+                          disabled={narrationMode !== "generated" || generatedVoices.length === 0}
+                          value={selectedGeneratedVoice || ""}
+                          onChange={(e) => setSelectedGeneratedVoice(e.target.value || null)}
+                          style={{ flex: 1, fontSize: 11 }}
+                        >
+                          {generatedVoices.length === 0 && <option value="">No generated voices found</option>}
+                          {generatedVoices.map((v) => (
+                            <option key={v.path} value={v.path}>
+                              {v.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <input
+                          type="radio"
+                          style={{ width: "auto" }}
+                          checked={narrationMode === "manual"}
+                          onChange={() => setNarrationMode("manual")}
+                        />
+                        Use audio file from disk
+                      </label>
+                      <div style={{ marginLeft: 20, display: "flex", gap: 6, alignItems: "center" }}>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const result = await window.api.pickNarrationAudio?.();
+                            if (result && result.path) {
+                              setManualNarrationPath(result.path);
+                              setNarrationMode("manual");
+                            }
+                          }}
+                          style={{ background: "#f1f5f9", color: "#475569", border: "none", padding: "6px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer" }}
+                        >
+                          Browse audio
+                        </button>
+                        <code style={{ fontSize: 10, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {manualNarrationPath || "No file selected"}
+                        </code>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Playlist */}

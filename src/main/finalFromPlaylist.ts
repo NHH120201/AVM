@@ -140,6 +140,31 @@ function runFfmpegConcat(listFile: string, outputPath: string): Promise<void> {
   });
 }
 
+// ─── Mux narration audio onto a video (shortest) ─────────────────────────────
+function runFfmpegMuxAudio(
+  videoPath: string,
+  audioPath: string,
+  outputPath: string
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const args = [
+      "-y",
+      "-i", videoPath,
+      "-i", audioPath,
+      "-c:v", "copy",
+      "-c:a", "aac",
+      "-shortest",
+      "-movflags", "+faststart",
+      outputPath,
+    ];
+    const child = spawn("ffmpeg", args, { shell: false });
+    child.stderr.on("data", (chunk) => console.error(`[ffmpeg mux] ${chunk.toString()}`));
+    child.on("exit", (code) =>
+      code === 0 ? resolve() : reject(new Error(`ffmpeg mux exited with code ${code}`))
+    );
+  });
+}
+
 // ─── Fisher-Yates shuffle ─────────────────────────────────────────────────────
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -168,7 +193,8 @@ export async function buildFinalFromPlaylist(
   topic: string,
   items: PlaylistItem[],
   secPerClip: number,
-  maxDurationSec: number
+  maxDurationSec: number,
+  narrationAudioPath?: string | null
 ): Promise<{ outputPath: string }> {
   if (!items.length) throw new Error("No playlist items provided");
 
@@ -279,15 +305,30 @@ export async function buildFinalFromPlaylist(
   if (fs.existsSync(listFile)) fs.unlinkSync(listFile);
   fs.writeFileSync(listFile, lines.join("\n"), "utf8");
 
-  const outputPath = getUniquePath(outDir, `${topicSafe}_playlist.mp4`);
-  await runFfmpegConcat(listFile, outputPath);
+  const baseOutputPath = getUniquePath(outDir, `${topicSafe}_playlist.mp4`);
+  await runFfmpegConcat(listFile, baseOutputPath);
+
+  let finalOutputPath = baseOutputPath;
+
+  // Optionally mux narration audio if provided
+  if (narrationAudioPath && fs.existsSync(narrationAudioPath)) {
+    const muxedPath = getUniquePath(outDir, `${topicSafe}_playlist_with_audio.mp4`);
+    console.log(`[Build] Muxing narration audio: ${narrationAudioPath}`);
+    try {
+      await runFfmpegMuxAudio(baseOutputPath, narrationAudioPath, muxedPath);
+      finalOutputPath = muxedPath;
+    } catch (err) {
+      console.error("[Build] Failed to mux narration audio:", err);
+      finalOutputPath = baseOutputPath;
+    }
+  }
 
   // Write metadata
   try {
     fs.writeFileSync(
-      outputPath.replace(/\.mp4$/i, ".meta.json"),
+      finalOutputPath.replace(/\.mp4$/i, ".meta.json"),
       JSON.stringify({
-        videoPath: outputPath,
+        videoPath: finalOutputPath,
         topic: topicSafe,
         secPerClip,
         maxDurationSec,
@@ -295,6 +336,7 @@ export async function buildFinalFromPlaylist(
         clipCount: finalClips.length,
         createdAt: new Date().toISOString(),
         sources: items.map((i) => i.path),
+        narrationAudioPath: narrationAudioPath || null,
       }, null, 2),
       "utf8"
     );
@@ -302,5 +344,5 @@ export async function buildFinalFromPlaylist(
     console.error("Failed to write meta:", err);
   }
 
-  return { outputPath };
+  return { outputPath: finalOutputPath };
 }

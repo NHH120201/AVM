@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import sys
 
 import torch
@@ -12,32 +13,69 @@ except ImportError:
     sys.exit(1)
 
 
-def chunk_text(text: str, max_chars: int = 500) -> list[str]:
-    """Split long text into reasonably sized chunks by paragraphs and sentences.
+def chunk_text(text: str, max_chars: int = 180) -> list[str]:
+    """Split long text into speech-friendly chunks.
 
-    This keeps each generation manageable while still returning a single final file.
+    Strategy:
+    1. Split by sentence boundaries (. ? !).
+    2. Repack sentences into chunks no longer than max_chars.
+    3. Never cut inside a word (we only split on whitespace / sentence marks).
     """
-    # First split by blank lines as paragraphs
-    paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+    text = text.strip()
+    if not text:
+        return []
+
+    # 1) Split into sentences while keeping punctuation
+    # We split on ., ?, ! followed by space or end of string.
+    parts = re.split(r"([.?!])", text)
+    sentences: list[str] = []
+    buf = ""
+    for part in parts:
+        if part is None or part == "":
+            continue
+        buf += part
+        if part in ".?!":
+            sent = buf.strip()
+            if sent:
+                sentences.append(sent)
+            buf = ""
+    # Any leftover without terminal punctuation
+    if buf.strip():
+        sentences.append(buf.strip())
+
+    if not sentences:
+        return [text]
+
+    # 2) Pack sentences into chunks up to max_chars
     chunks: list[str] = []
     current = ""
 
-    for p in paragraphs:
-        if not current:
-            current = p
+    for sent in sentences:
+        s = sent.strip()
+        if not s:
             continue
-        if len(current) + 1 + len(p) <= max_chars:
-            current = current + "\n" + p
-        else:
-            chunks.append(current)
-            current = p
-    if current:
-        chunks.append(current)
 
-    # If still somehow tiny or huge, just fall back to raw text as a single chunk
-    if not chunks:
-        return [text]
-    return chunks
+        # If a single sentence is longer than max_chars, just push it as-is
+        if len(s) > max_chars:
+            if current:
+                chunks.append(current.strip())
+                current = ""
+            chunks.append(s)
+            continue
+
+        if not current:
+            current = s
+        elif len(current) + 1 + len(s) <= max_chars:
+            # Add with a space — this never cuts inside a word
+            current = current + " " + s
+        else:
+            chunks.append(current.strip())
+            current = s
+
+    if current.strip():
+        chunks.append(current.strip())
+
+    return chunks or [text]
 
 
 def main() -> None:

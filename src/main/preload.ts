@@ -22,9 +22,12 @@ contextBridge.exposeInMainWorld("api", {
   pickFinalVideo: () => ipcRenderer.invoke("video:pickFinal"),
   listRuns: () => ipcRenderer.invoke("video:listRuns"),
   pickFolderAndListVideos: () => ipcRenderer.invoke("video:pickFolder"),
-  buildFinalFromSelected: (params: { topic: string; items: { path: string; label: string }[]; maxClipSeconds: number; maxDurationSeconds: number }) =>
+  buildFinalFromSelected: (params: { topic: string; items: { path: string; label: string }[]; maxClipSeconds: number; maxDurationSeconds: number; narrationAudioPath?: string | null }) =>
     ipcRenderer.invoke("video:buildFinalFromSelected", params),
   ttsGenerate: (params: { text: string; outputPath?: string; promptPath?: string | null; exaggeration?: number; cfgWeight?: number }) =>
     ipcRenderer.invoke("tts:generate", params),
   ttsPickPrompt: () => ipcRenderer.invoke("tts:pickPrompt"),
+  ttsTranscribe: (audioPath: string) => ipcRenderer.invoke("tts:transcribe", { audioPath }),
+  listGeneratedVoices: () => ipcRenderer.invoke("tts:listGenerated"),
+  pickNarrationAudio: () => ipcRenderer.invoke("audio:pickFile"),
 });

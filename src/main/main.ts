@@ -4,6 +4,7 @@ import path from "path";
 import { runPipeline } from "./pipeline";
 import { spawn } from "child_process";
 import { saveUrlSet, listTopics } from "./urlSets";
+import { execFile } from "child_process";
 import { loadLatestManifest } from "./manifest";
 import { listRuns } from "./runs";
 import { buildFinalFromPlaylist, PlaylistItem } from "./finalFromPlaylist";
@@ -209,6 +210,39 @@ ipcMain.handle("video:listRuns", async () => {
   return listRuns();
 });
 
+// List generated TTS voices (WAV files) from the out/ folder
+ipcMain.handle("tts:listGenerated", async () => {
+  try {
+    const outDir = path.join(process.cwd(), "out");
+    const files = fs.readdirSync(outDir, { withFileTypes: true });
+    const wavs = files
+      .filter((f) => f.isFile() && f.name.toLowerCase().endsWith(".wav"))
+      .map((f) => ({
+        label: f.name,
+        path: path.join(outDir, f.name),
+      }));
+    // Sort by name so tts-output, tts-output (1), ... are ordered
+    wavs.sort((a, b) => a.label.localeCompare(b.label));
+    return wavs;
+  } catch {
+    return [];
+  }
+});
+
+// Manually pick an external audio file for narration
+ipcMain.handle("audio:pickFile", async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Select narration audio",
+    properties: ["openFile"],
+    filters: [
+      { name: "Audio", extensions: ["wav", "mp3", "flac", "ogg", "m4a"] },
+    ],
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return { path: result.filePaths[0] };
+});
+
 ipcMain.handle("video:pickFolder", async () => {
   if (!mainWindow) return null;
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -245,13 +279,50 @@ ipcMain.handle("video:pickFolder", async () => {
 });
 
 ipcMain.handle("video:buildFinalFromSelected", async (_event, args) => {
-  const { topic, items, maxClipSeconds, maxDurationSeconds } = args as {
+  const { topic, items, maxClipSeconds, maxDurationSeconds, narrationAudioPath } = args as {
     topic: string;
     items: PlaylistItem[];
     maxClipSeconds: number;
     maxDurationSeconds: number;
+    narrationAudioPath?: string | null;
   };
-  return buildFinalFromPlaylist(topic, items, maxClipSeconds, maxDurationSeconds);
+  return buildFinalFromPlaylist(topic, items, maxClipSeconds, maxDurationSeconds, narrationAudioPath);
+});
+
+// Speech-to-text: transcribe a narration WAV with Vosk
+ipcMain.handle("tts:transcribe", async (_event, args: { audioPath: string }) => {
+  const audioPath = args.audioPath;
+  const modelPath = path.join(process.cwd(), "vosk-model-en-us-0.42-gigaspeech", "vosk-model-en-us-0.42-gigaspeech");
+
+  if (!fs.existsSync(audioPath)) {
+    throw new Error(`Audio file not found: ${audioPath}`);
+  }
+  if (!fs.existsSync(modelPath)) {
+    throw new Error(`Vosk model not found at ${modelPath}`);
+  }
+
+  const outJson = audioPath.replace(/\.wav$/i, ".vosk.json");
+
+  return new Promise<{ words: { word: string; start: number; end: number }[] }>((resolve, reject) => {
+    const pythonExe = "python";
+    const scriptPath = path.join(process.cwd(), "stt_vosk.py");
+
+    execFile(pythonExe, [scriptPath, audioPath, modelPath, outJson], { cwd: process.cwd() }, (err) => {
+      if (err) {
+        console.error("[STT] Failed:", err);
+        reject(err);
+        return;
+      }
+      try {
+        const raw = fs.readFileSync(outJson, "utf8");
+        const parsed = JSON.parse(raw);
+        const words = Array.isArray(parsed.words) ? parsed.words : [];
+        resolve({ words });
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
 });
 
 // Text-to-Speech: run Chatterbox Turbo via Python helper script
@@ -295,7 +366,20 @@ ipcMain.handle("tts:generate", async (_event, args: { text: string; outputPath?:
     }
 
     const env = { ...process.env };
-    // Expect HF_TOKEN to be provided via environment; do not hardcode secrets here.
+    // Prefer HF_TOKEN from environment, but allow a local hf_token.txt file (ignored by Git)
+    if (!env.HF_TOKEN) {
+      try {
+        const tokenPath = path.join(process.cwd(), "hf_token.txt");
+        if (fs.existsSync(tokenPath)) {
+          const fileToken = fs.readFileSync(tokenPath, "utf8").trim();
+          if (fileToken) {
+            env.HF_TOKEN = fileToken;
+          }
+        }
+      } catch (err) {
+        console.error("[TTS] Failed to read hf_token.txt:", err);
+      }
+    }
 
     const child = spawn(pythonExe, argsList, {
       cwd: process.cwd(),

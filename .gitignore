@@ -20,3 +20,6 @@ Thumbs.db
 
 # Misc
 *.log
+
+# Local secrets (never commit)
+hf_token.txt
