@@ -168,15 +168,193 @@ ipcMain.handle("manifest:load", async (_event, args: { topic: string }) => {
   return { videos: manifest.videos };
 });
 
+function buildAssFromVoskJson(
+  voskJsonPath: string,
+  opts: { font?: string; size?: number; color?: string; position?: "bottom" | "middle" | "top" }
+): string {
+  const raw = fs.readFileSync(voskJsonPath, "utf8");
+  const parsed = JSON.parse(raw);
+  const words: { word: string; start: number; end: number }[] = Array.isArray(parsed.words)
+    ? parsed.words
+    : [];
+
+  const OFFSET = 0.21 // subtitles appear this many seconds earlier
+
+  const chunks: { start: number; end: number; text: string }[] = [];
+  for (let i = 0; i < words.length; i += 3) {
+    const slice = words.slice(i, i + 3);
+    if (!slice.length) continue;
+
+    const startRaw = slice[0].start ?? 0;
+    const endRaw = slice[slice.length - 1].end ?? startRaw + 1;
+
+    const start = Math.max(0, startRaw - OFFSET);
+    const end = Math.max(start + 0.1, endRaw - OFFSET);
+
+    const text = slice.map((w) => w.word).join(" ");
+    chunks.push({ start, end, text });
+  }
+
+  const formatAssTime = (sec: number) => {
+    if (!isFinite(sec) || sec < 0) sec = 0;
+    const hours = Math.floor(sec / 3600);
+    const minutes = Math.floor((sec % 3600) / 60);
+    const seconds = Math.floor(sec % 60);
+    const centis = Math.floor((sec - Math.floor(sec)) * 100);
+    const pad = (n: number, width: number) => String(n).padStart(width, "0");
+    return `${hours}:${pad(minutes, 2)}:${pad(seconds, 2)}.${pad(centis, 2)}`;
+  };
+
+  // Map simple color names/hex to ASS BGR format (&HAABBGGRR).
+  const toAssColor = (color?: string): string => {
+    const lower = (color || "").toLowerCase().trim();
+    let r = 255, g = 255, b = 255; // default white
+    if (lower === "yellow") { r = 255; g = 255; b = 0; }
+    else if (lower === "cyan") { r = 0; g = 255; b = 255; }
+    else if (lower.startsWith("#") && (lower.length === 7)) {
+      const hex = lower.slice(1);
+      r = parseInt(hex.slice(0, 2), 16);
+      g = parseInt(hex.slice(2, 4), 16);
+      b = parseInt(hex.slice(4, 6), 16);
+    }
+    const toByte = (n: number) => {
+      const v = Math.max(0, Math.min(255, n | 0));
+      return v.toString(16).padStart(2, "0");
+    };
+    const rr = toByte(r);
+    const gg = toByte(g);
+    const bb = toByte(b);
+    // &HAABBGGRR - we use AA=00 (opaque)
+    return `&H00${bb}${gg}${rr}`;
+  };
+
+  const fontName = opts.font && opts.font.trim().length > 0 ? opts.font.trim() : "Segoe UI";
+  const fontSize = typeof opts.size === "number" && opts.size > 0 ? opts.size : 40;
+  const primaryColor = toAssColor(opts.color);
+  const alignment = opts.position === "top" ? 8 : opts.position === "middle" ? 5 : 2;
+
+  const lines: string[] = [];
+  lines.push("[Script Info]");
+  lines.push("ScriptType: v4.00+");
+  lines.push("");
+  lines.push("[V4+ Styles]");
+  lines.push(
+    "Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"
+  );
+  const outlineColour = "&H00000000";
+  const backColour = "&H64000000"; // semi-transparent background
+  const style = [
+    "Default",
+    fontName,
+    fontSize,
+    primaryColor,
+    outlineColour,
+    backColour,
+    0, // Bold
+    0, // Italic
+    1, // BorderStyle (outline)
+    2, // Outline
+    2, // Shadow
+    alignment, // Alignment
+    10,
+    10,
+    40,
+    1,
+  ].join(",");
+  lines.push(`Style: ${style}`);
+  lines.push("");
+
+  lines.push("[Events]");
+  lines.push("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
+  for (const c of chunks) {
+    lines.push(
+      `Dialogue: 0,${formatAssTime(c.start)},${formatAssTime(c.end)},Default,,0,0,0,,${c.text}`
+    );
+  }
+
+  const base = voskJsonPath.replace(/\.vosk\.json$/i, "");
+  const assPath = `${base}.ass`;
+  fs.writeFileSync(assPath, lines.join("\n"), "utf8");
+  return assPath;
+}
+
 ipcMain.handle("video:injectCaption", async (_event, args: {
   inputPath: string;
-  caption: string;
-  font: string;
-  color: string;
-  size: number;
+  caption?: string;
+  font?: string;
+  color?: string;
+  size?: number;
+  voskJsonPath?: string;
 }) => {
-  // Stub for now: just return the same path; real ffmpeg overlay can be added later.
-  return { outputPath: args.inputPath };
+  const inputPath = args.inputPath;
+  if (!fs.existsSync(inputPath)) {
+    throw new Error(`Input video not found: ${inputPath}`);
+  }
+
+  let assPath: string | null = null;
+  if (args.voskJsonPath && fs.existsSync(args.voskJsonPath)) {
+    assPath = buildAssFromVoskJson(args.voskJsonPath, {
+      font: args.font,
+      size: args.size,
+      color: args.color,
+    });
+  } else {
+    // For now we only support Vosk-driven subtitles; fallback is no-op
+    return { outputPath: inputPath };
+  }
+
+  const dir = path.dirname(inputPath);
+  const ext = path.extname(inputPath) || ".mp4";
+  const baseName = path.basename(inputPath, ext);
+  let outPath = path.join(dir, `${baseName}_subbed${ext}`);
+  let idx = 1;
+  while (fs.existsSync(outPath)) {
+    outPath = path.join(dir, `${baseName}_subbed (${idx})${ext}`);
+    idx += 1;
+  }
+
+  return await new Promise<{ outputPath: string }>((resolve, reject) => {
+    // Windows paths + ffmpeg subtitles filter are extremely picky. We:
+    // - Use forward slashes
+    // - Escape ':' as '\:' inside the filter
+    // - Escape spaces and parentheses
+    // - Wrap the whole thing in single quotes for the filter argument.
+    const srtForFilterInner = assPath
+      .replace(/\\/g, "/")    // backslashes → forward slashes
+      .replace(/:/g, "\\:")   // C:/ → C\:/
+      .replace(/ /g, "\\ ")   // spaces
+      .replace(/\(/g, "\\(") // '('
+      .replace(/\)/g, "\\)"); // ')'
+
+    const filterExpr = `subtitles='${srtForFilterInner}'`;
+
+    const ffmpegArgs = [
+      "-y",
+      "-i",
+      inputPath,
+      "-vf",
+      filterExpr,
+      "-c:a",
+      "copy",
+      outPath,
+    ];
+
+    const child = spawn("ffmpeg", ffmpegArgs, { cwd: process.cwd() });
+
+    child.stdout.on("data", (data) => {
+      console.log("[FFMPEG subtitles stdout]", data.toString());
+    });
+    child.stderr.on("data", (data) => {
+      console.error("[FFMPEG subtitles stderr]", data.toString());
+    });
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve({ outputPath: outPath });
+      } else {
+        reject(new Error(`ffmpeg subtitle burn exited with code ${code}`));
+      }
+    });
+  });
 });
 
 ipcMain.handle("video:pickFinal", async () => {
@@ -290,6 +468,17 @@ ipcMain.handle("video:buildFinalFromSelected", async (_event, args) => {
 });
 
 // Speech-to-text: transcribe a narration WAV with Vosk
+ipcMain.handle("tts:pickVoskJson", async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Select Vosk JSON transcript",
+    properties: ["openFile"],
+    filters: [{ name: "JSON", extensions: ["json"] }],
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return { path: result.filePaths[0] };
+});
+
 ipcMain.handle("tts:transcribe", async (_event, args: { audioPath: string }) => {
   const audioPath = args.audioPath;
   const modelPath = path.join(process.cwd(), "vosk-model-en-us-0.42-gigaspeech", "vosk-model-en-us-0.42-gigaspeech");
@@ -303,11 +492,30 @@ ipcMain.handle("tts:transcribe", async (_event, args: { audioPath: string }) => 
 
   const outJson = audioPath.replace(/\.wav$/i, ".vosk.json");
 
+  // Always convert to mono 16-bit PCM before feeding to Vosk
+  const pcmPath = audioPath.replace(/\.wav$/i, "_pcm16.wav");
+
+  await new Promise<void>((resolve, reject) => {
+    const ffArgs = [
+      "-y",
+      "-i", audioPath,
+      "-ac", "1",          // mono
+      "-ar", "16000",      // 16 kHz
+      "-sample_fmt", "s16",// 16-bit PCM
+      pcmPath,
+    ];
+    const child = spawn("ffmpeg", ffArgs, { cwd: process.cwd() });
+    child.on("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg pcm16 convert exited with code ${code}`));
+    });
+  });
+
   return new Promise<{ words: { word: string; start: number; end: number }[] }>((resolve, reject) => {
     const pythonExe = "python";
     const scriptPath = path.join(process.cwd(), "stt_vosk.py");
 
-    execFile(pythonExe, [scriptPath, audioPath, modelPath, outJson], { cwd: process.cwd() }, (err) => {
+    execFile(pythonExe, [scriptPath, pcmPath, modelPath, outJson], { cwd: process.cwd() }, (err) => {
       if (err) {
         console.error("[STT] Failed:", err);
         reject(err);

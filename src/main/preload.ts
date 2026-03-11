@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("video:listTopicsInFolder", { baseFolder }),
   loadManifest: (params: { topic: string }) =>
     ipcRenderer.invoke("manifest:load", params),
-  injectCaption: (params: { inputPath: string; caption: string; font: string; color: string; size: number }) =>
+  injectCaption: (params: { inputPath: string; caption?: string; font?: string; color?: string; size?: number; voskJsonPath?: string }) =>
     ipcRenderer.invoke("video:injectCaption", params),
   pickFinalVideo: () => ipcRenderer.invoke("video:pickFinal"),
   listRuns: () => ipcRenderer.invoke("video:listRuns"),
@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("tts:generate", params),
   ttsPickPrompt: () => ipcRenderer.invoke("tts:pickPrompt"),
   ttsTranscribe: (audioPath: string) => ipcRenderer.invoke("tts:transcribe", { audioPath }),
+  ttsPickVoskJson: () => ipcRenderer.invoke("tts:pickVoskJson"),
   listGeneratedVoices: () => ipcRenderer.invoke("tts:listGenerated"),
   pickNarrationAudio: () => ipcRenderer.invoke("audio:pickFile"),
 });

@@ -56,6 +56,11 @@ export const App: React.FC = () => {
   const [generatedVoices, setGeneratedVoices] = useState<{ label: string; path: string }[]>([]);
   const [selectedGeneratedVoice, setSelectedGeneratedVoice] = useState<string | null>(null);
   const [manualNarrationPath, setManualNarrationPath] = useState<string | null>(null);
+  const [voskJsonPath, setVoskJsonPath] = useState<string | null>(null);
+  const [subtitleFont, setSubtitleFont] = useState<string>("Luckiest Guy");
+  const [subtitleSize, setSubtitleSize] = useState<number>(40);
+  const [subtitleColor, setSubtitleColor] = useState<string>("white");
+  const [subtitlePosition, setSubtitlePosition] = useState<"bottom" | "middle" | "top">("bottom");
 
   const logContainerRef = useRef<HTMLDivElement | null>(null);
   const autoScrollRef = useRef(true);
@@ -221,6 +226,16 @@ export const App: React.FC = () => {
       setTtsOutputPath(result.outputPath);
       setLog((prev) => [...prev, `[TTS] Generated: ${result.outputPath}`]);
 
+      // Auto-run Vosk STT on the generated WAV to create .vosk.json
+      try {
+        await window.api.ttsTranscribe(result.outputPath);
+        const jsonPath = result.outputPath.replace(/\.wav$/i, ".vosk.json");
+        setVoskJsonPath(jsonPath);
+        setLog((prev) => [...prev, `[STT] Vosk transcript created: ${jsonPath}`]);
+      } catch (err: any) {
+        setLog((prev) => [...prev, `[STT ERROR] ${err.message || String(err)}`]);
+      }
+
       // Refresh generated voices list so new file appears in the Classic narration dropdown
       try {
         const voices = await window.api.listGeneratedVoices?.();
@@ -284,6 +299,39 @@ export const App: React.FC = () => {
     : null;
 
   const finalFileUrl = finalPath ? `file:///${finalPath.replace(/\\/g, "/")}` : null;
+
+  const handleBurnSubtitlesWithVosk = async () => {
+    if (!finalPath) {
+      setLog((prev) => [...prev, "[SUB] No final video available to burn subtitles on."]);
+      return;
+    }
+
+    // Prefer an explicitly chosen JSON; fall back to inferring from generated voice.
+    let jsonPath: string | null = voskJsonPath;
+    if (!jsonPath && selectedGeneratedVoice) {
+      jsonPath = selectedGeneratedVoice.replace(/\.wav$/i, ".vosk.json");
+    }
+
+    if (!jsonPath) {
+      setLog((prev) => [...prev, "[SUB] No Vosk JSON selected or inferred; cannot burn subtitles."]);
+      return;
+    }
+
+    try {
+      const result = await window.api.injectCaption({
+        inputPath: finalPath,
+        voskJsonPath: jsonPath,
+        font: subtitleFont,
+        size: subtitleSize,
+        color: subtitleColor,
+        position: subtitlePosition,
+      });
+      setFinalPath(result.outputPath);
+      setLog((prev) => [...prev, `[SUB] Subtitled video created: ${result.outputPath}`]);
+    } catch (err: any) {
+      setLog((prev) => [...prev, `[SUB ERROR] ${err.message || String(err)}`]);
+    }
+  };
 
   const renderProUI = () => (
     <>
@@ -859,6 +907,13 @@ export const App: React.FC = () => {
               >
                 Open in Explorer
               </button>
+              <button
+                style={{ width: "100%" }}
+                disabled={!finalPath || !selectedGeneratedVoice}
+                onClick={handleBurnSubtitlesWithVosk}
+              >
+                Burn Vosk Subtitles (3 words/line)
+              </button>
             </div>
           </section>
 
@@ -910,7 +965,7 @@ export const App: React.FC = () => {
         </h1>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <span style={{ fontSize: 12, color: "#64748b" }}>v2.4.0 (Stable)</span>
-          <button onClick={() => setProMode(true)} style={{ background: "#f1f5f9", color: "#475569", padding: "6px 10px", borderRadius: 8, fontSize: 12, border: "none", cursor: "pointer" }}>Go Pro</button>
+          <button onClick={() => setProMode(true)} style={{ background: "#f1f5f9", color: "#475569", padding: "6px 10px", borderRadius: 8, fontSize: 12, border: "none", cursor: "pointer" }}>Pro layout</button>
           <button style={{ background: "#f1f5f9", color: "#475569", padding: "6px 10px", borderRadius: 8, fontSize: 12, border: "none", cursor: "pointer" }}>Settings</button>
         </div>
       </header>
@@ -1156,6 +1211,86 @@ export const App: React.FC = () => {
                     </div>
                   </div>
 
+                  <div style={{ marginTop: 8, fontSize: 11 }}>
+                    <span style={{ display: "block", marginBottom: 4 }}>Vosk JSON for subtitles (optional):</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const result = await window.api.ttsPickVoskJson?.();
+                          if (result && result.path) {
+                            setVoskJsonPath(result.path);
+                            setLog((prev) => [...prev, `[SUB] Using Vosk JSON: ${result.path}`]);
+                          }
+                        }}
+                        style={{ background: "#f1f5f9", color: "#475569", border: "none", padding: "6px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer" }}
+                      >
+                        Browse JSON
+                      </button>
+                      <code style={{ fontSize: 10, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {voskJsonPath || "Auto from voice (.vosk.json)"}
+                      </code>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 8, fontSize: 11, display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 8 }}>
+                    <div>
+                      <span style={{ display: "block", marginBottom: 4 }}>Subtitle font</span>
+                      <select
+                        value={subtitleFont}
+                        onChange={(e) => setSubtitleFont(e.target.value)}
+                        style={{ width: "100%", fontSize: 11 }}
+                      >
+                        <option value="System">System default</option>
+                        <option value="System">System default</option>
+                        <option value="Bungee Tint">Bungee Tint</option>
+                        <option value="Coiny">Coiny</option>
+                        <option value="DynaPuff">DynaPuff</option>
+                        <option value="Knewave">Knewave</option>
+                        <option value="Luckiest Guy">Luckiest Guy</option>
+                        <option value="Margarine">Margarine</option>
+                      </select>
+                    </div>
+                    <div>
+                      <span style={{ display: "block", marginBottom: 4 }}>Size</span>
+                      <input
+                        type="number"
+                        value={subtitleSize}
+                        onChange={(e) => {
+                          const v = Number(e.target.value) || 0;
+                          setSubtitleSize(v > 0 ? v : 1);
+                        }}
+                        style={{ width: "100%", fontSize: 11 }}
+                        min={8}
+                        max={120}
+                      />
+                    </div>
+                    <div>
+                      <span style={{ display: "block", marginBottom: 4 }}>Color</span>
+                      <select
+                        value={subtitleColor}
+                        onChange={(e) => setSubtitleColor(e.target.value)}
+                        style={{ width: "100%", fontSize: 11 }}
+                      >
+                        <option value="white">White</option>
+                        <option value="yellow">Yellow</option>
+                        <option value="cyan">Cyan</option>
+                      </select>
+                    </div>
+                    <div>
+                      <span style={{ display: "block", marginBottom: 4 }}>Position</span>
+                      <select
+                        value={subtitlePosition}
+                        onChange={(e) => setSubtitlePosition(e.target.value as any)}
+                        style={{ width: "100%", fontSize: 11 }}
+                      >
+                        <option value="bottom">Bottom</option>
+                        <option value="middle">Middle</option>
+                        <option value="top">Top</option>
+                      </select>
+                    </div>
+                  </div>
+
                   <div style={{ marginTop: 8 }}>
                     <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
                       <input
@@ -1288,12 +1423,31 @@ export const App: React.FC = () => {
                   <p style={{ margin: "4px 0 0 0", fontSize: 12 }}>Complete the playlist and click 'Generate' to see the result.</p>
                 </div>}
             <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+              <button
+                style={{ width: "100%", background: "#f1f5f9", color: "#475569", border: "none", padding: "10px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer" }}
+                onClick={async () => {
+                  const result = await window.api.pickFinalVideo?.();
+                  if (result && result.path) {
+                    setFinalPath(result.path);
+                    setLog((prev) => [...prev, `[UI] Loaded existing final video: ${result.path}`]);
+                  }
+                }}
+              >
+                Choose Existing Final Video
+              </button>
               <button style={{ width: "100%", background: "#f1f5f9", color: "#475569", border: "none", padding: "10px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer" }} disabled={!finalPath}>
                 Download Final File
               </button>
               <button onClick={handleOpenFolder} disabled={!finalPath}
                 style={{ width: "100%", background: "#f1f5f9", color: "#475569", border: "none", padding: "10px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>
                 Open in Explorer
+              </button>
+              <button
+                onClick={handleBurnSubtitlesWithVosk}
+                disabled={!finalPath || !selectedGeneratedVoice}
+                style={{ width: "100%", background: "#2563eb", color: "white", border: "none", padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: finalPath && selectedGeneratedVoice ? "pointer" : "default" }}
+              >
+                Burn Vosk Subtitles (3 words/line)
               </button>
             </div>
           </section>
