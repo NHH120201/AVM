@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useRef, useState } from "react";
 import { ManifestVideo } from "./types";
-import { VideoEditor, TimelineClip  } from "./VideoEditor";
+import { VideoEditor, TimelineClip, TextClip } from "./VideoEditor";
 
 type StepStatus = "pending" | "running" | "done" | "error";
 
@@ -233,19 +233,20 @@ export const App: React.FC = () => {
     }
 
     try {
-      const result = await window.api.ttsGenerate({
+      const result = await window.api.ttsGenerate?.({
         text: ttsText.trim(),
         outputPath: "",
         promptPath: ttsPromptPath,
         exaggeration,
         cfgWeight: cfg,
       });
+      if (!result) return;
       setTtsOutputPath(result.outputPath);
       setLog((prev) => [...prev, `[TTS] Generated: ${result.outputPath}`]);
 
       // Auto-run Vosk STT on the generated WAV to create .vosk.json
       try {
-        await window.api.ttsTranscribe(result.outputPath);
+        await window.api.ttsTranscribe?.(result.outputPath);
       const baseName = result.outputPath.replace(/^.*[\\/]/, "").replace(/\.wav$/i, "");
       const jsonPath = `C:\\Users\\Admin\\.openclaw\\workspace\\AVM\\Audio\\Subtitles\\${baseName}.vosk.json`;
       setVoskJsonPath(jsonPath);
@@ -507,7 +508,7 @@ export const App: React.FC = () => {
                     const checked = e.target.checked;
                     setUseExistingFolder(checked);
                     if (checked && downloadFolder) {
-                      const topics = await window.api.listTopicsInFolder(downloadFolder);
+                      const topics = await window.api.listTopicsInFolder?.(downloadFolder) ?? [];
                       setExistingTopics(topics);
                       setSelectedExistingTopic(topics[0] ?? null);
                     }
@@ -742,7 +743,7 @@ export const App: React.FC = () => {
                     <button
                       type="button"
                       onClick={async () => {
-                        const result = await window.api.ttsPickPrompt();
+                        const result = await window.api.ttsPickPrompt?.();
                         if (result && result.path) {
                           setTtsPromptPath(result.path);
                           setLog((prev) => [...prev, `[TTS] Using prompt: ${result.path}`]);
@@ -1917,7 +1918,7 @@ export const App: React.FC = () => {
                       <button
                         type="button"
                         onClick={async () => {
-                          const result = await window.api.ttsPickPrompt();
+                          const result = await window.api.ttsPickPrompt?.();
                           if (result && result.path) {
                             setTtsPromptPath(result.path);
                             setLog((prev) => [...prev, `[TTS] Using prompt: ${result.path}`]);
@@ -2154,7 +2155,7 @@ export const App: React.FC = () => {
                 <button
                   type="button"
                   onClick={async () => {
-                    const result = await window.api.ttsPickPrompt();
+                    const result = await window.api.ttsPickPrompt?.();
                     if (result && result.path) {
                       setTtsPromptPath(result.path);
                       setLog((prev) => [...prev, `[TTS] Using prompt: ${result.path}`]);

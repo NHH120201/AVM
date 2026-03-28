@@ -14,5 +14,6 @@
       "@/*": ["src/renderer/*"]
     }
   },
-  "include": ["src/renderer", "vite.config.ts"]
+  "include": ["src/renderer", "vite.config.ts"],
+  "exclude": ["src/renderer/VideoEditor_backup_2026-03-18.tsx"]
 }

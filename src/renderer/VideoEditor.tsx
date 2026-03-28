@@ -427,7 +427,7 @@ const syncAudioToTime = useCallback((t: number) => {
   const next=pendingOffsetRef.current;if(!next)return;
   pendingOffsetRef.current=null;seekPendingRef.current=true;vid.currentTime=next.offset;
   if("requestVideoFrameCallback" in vid){(vid as any).requestVideoFrameCallback(()=>{seekPendingRef.current=false;if(pendingOffsetRef.current)flushSeek(vid);});}
-  else{vid.addEventListener("seeked",()=>{seekPendingRef.current=false;if(pendingOffsetRef.current)flushSeek(vid);},{once:true});}
+  else{(vid as HTMLVideoElement).addEventListener("seeked",()=>{seekPendingRef.current=false;if(pendingOffsetRef.current)flushSeek(vid);},{once:true});}
  },[]);
 
  const applyScrub=useCallback((t:number)=>{

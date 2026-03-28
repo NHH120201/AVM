@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #111214;
+  --color-surface: #1a1d27;
+  --color-card: #1e2130;
+  --color-border: #2d3148;
+  --color-primary: #6366f1;
+  --color-primary-hover: #4f46e5;
+  --color-accent: #22c55e;
+  --color-destructive: #ef4444;
+  --color-foreground: #e2e8f0;
+  --color-muted: #94a3b8;
+
+  --font-family-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-family-mono: 'Fira Code', monospace;
+}
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  /* Dark-theme defaults — complement the inline styles already in App/VideoEditor */
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background: #111214;
+    color: #e2e8f0;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Custom slim scrollbars (where visible) */
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #1a1d27;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2d3148;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3d4168;
+  }
+
+  /* Range sliders */
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #6366f1;
+    cursor: pointer;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3);
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: #6366f1;
+  }
+
+  video {
+    display: block;
+  }
+}
