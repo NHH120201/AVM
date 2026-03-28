@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Misc
+*.log
+
+# Local secrets (never commit)
+hf_token.txt
+
+# Python/Node virtual envs
+.venv/
+
+# Generated media (videos/audio/subtitles)
+Video/DownloadedVideo/
+Video/EditVideo/CutClips/
+Audio/VoiceGenerated/
+Audio/Subtitles/*.ass
+Audio/Subtitles/*.vosk.json
+node_modules/
+Video/ 
+Audio/
+Tools/
+.git/
+*.mp4 
+*.mp3 
+*.wav 
+*.exe
