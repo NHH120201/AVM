@@ -193,7 +193,7 @@ export const App: React.FC = () => {
 
   const handleOpenFolder = () => {
     if (!finalPath) return;
-    const folder = finalPath.replace(/\[^\]+$/, "");
+    const folder = finalPath.replace(/[^\\/]+$/, "");
     window.open(`file://${folder.replace(/\\/g, "/")}`);
   };
 
@@ -330,7 +330,7 @@ export const App: React.FC = () => {
     let jsonPath: string | null = voskJsonPath;
     if (!jsonPath && selectedGeneratedVoice) {
       const baseName = selectedGeneratedVoice.replace(/^.*[\\/]/, "").replace(/\.wav$/i, "");
-      jsonPath = `C\\Users\\Admin\\.openclaw\\workspace\\AVM\\Audio\\Subtitles\\${baseName}.vosk.json`;
+      jsonPath = `C:\\Users\\Admin\\.openclaw\\workspace\\AVM\\Audio\\Subtitles\\${baseName}.vosk.json`;
     }
 
     if (!jsonPath) {

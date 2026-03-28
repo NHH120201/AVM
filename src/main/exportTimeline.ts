@@ -199,7 +199,9 @@ export async function exportTimeline(opts: ExportTimelineOptions): Promise<{ out
       }
 
       const inLabel = videoLabel;
-      const outLabel = idx === tClips.length - 1 ? "[vtext]" : `[vtext${idx}]`;
+      // Use a per-filter index (not per-tClip index) so the chain is always correct
+      // even when some tClips are skipped due to missing/empty text.
+      const outLabel = `[vtext${textFilters.length}]`;
 
       const draw = `${inLabel}drawtext=` +
         `font='${esc(fontFamily)}':` +
@@ -216,6 +218,9 @@ export async function exportTimeline(opts: ExportTimelineOptions): Promise<{ out
 
     if (textFilters.length) {
       filter += `;${textFilters.join(";")}`;
+      // Rename the final label to [vtext] so downstream scale/fps chain can reference it consistently
+      filter += `;${videoLabel}null[vtext]`;
+      videoLabel = "[vtext]";
     } else {
       filter += ";[vcat]null[vtext]";
       videoLabel = "[vtext]";

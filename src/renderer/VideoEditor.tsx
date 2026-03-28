@@ -447,7 +447,8 @@ const syncAudioToTime = useCallback((t: number) => {
  const razorCut=(id:string,atSec:number)=>{
   const clip=clipsRef.current.find(c=>c.id===id);if(!clip)return;
   const rel=atSec-clip.startSec+clip.trimStart;
-  if(rel<=clip.trimStart||rel>=clip.durationSec-clip.trimEnd)return;
+  // Guard: don't cut within 0.05s of the in/out points (would produce empty slices)
+  if(rel<=clip.trimStart+0.05||rel>=clip.durationSec-clip.trimEnd-0.05)return;
   const leftId=uid();const rightId=uid();
   const audioPartner=clipsRef.current.find(c=>c.path===clip.path&&c.startSec===clip.startSec&&c.track!==clip.track&&c.durationSec===clip.durationSec&&c.trimStart===clip.trimStart&&c.trimEnd===clip.trimEnd);
   setClips(prev=>{pushHistory(prev);return[...prev.filter(c=>c.id!==id),{...clip,id:leftId,trimEnd:clip.durationSec-rel},{...clip,id:rightId,startSec:clip.startSec+(rel-clip.trimStart),trimStart:rel}];});
@@ -588,7 +589,8 @@ const syncAudioToTime = useCallback((t: number) => {
    setSelectedTextId(id);
   } else {
    setExtraTracks(prev=>{
-    const usedIds=new Set([0,1,...prev.map(t=>t.id)]);let newId=2;while(usedIds.has(newId))newId++;
+    // Start from 4 to avoid colliding with reserved track IDs: 0=Video1, 1=Audio1, 2=Text, 3=Elements
+    const usedIds=new Set([0,1,2,3,...prev.map(t=>t.id)]);let newId=4;while(usedIds.has(newId))newId++;
     const sameTypeCount=prev.filter(t=>t.type===type).length;
     const label=type==="video"?`Video ${sameTypeCount+2}`:`Audio ${sameTypeCount+2}`;
     return[...prev,{id:newId,label,type}];
@@ -1460,7 +1462,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
       </div>
       {/* Auto Edit card */}
       <button
-        onClick={() => { setAutoEditOpen(true); setAutoEditStatus([]); }}
+        onClick={() => { setAutoEditOpen(true); if (!autoEditRunning) setAutoEditStatus([]); }}
         style={{ width: "100%", background: "linear-gradient(135deg,#1a1f3a,#0f1830)", border: "1px solid #6366f155", borderRadius: 10, padding: "14px 16px", cursor: "pointer", textAlign: "left", color: "#e5e7eb", display: "flex", flexDirection: "column", gap: 6, marginBottom: 4 }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>

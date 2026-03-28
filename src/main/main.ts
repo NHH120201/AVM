@@ -398,6 +398,8 @@ ipcMain.handle("whisper:transcribe", async (_event, args: { videoPath: string; l
   const jsonPath = path.join(tmpDir, `${path.basename(videoPath, path.extname(videoPath))}.json`);
   if (!fs.existsSync(jsonPath)) throw new Error(`Whisper output not found: ${jsonPath}`);
   const raw = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+  // Clean up temp JSON file after reading it
+  try { fs.unlinkSync(jsonPath); } catch {}
   return {
     segments: (raw.segments||[]).map((seg: any) => ({
       start: seg.start,
