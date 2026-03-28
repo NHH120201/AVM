@@ -320,8 +320,9 @@ const syncAudioToTime = useCallback((t: number) => {
    const audioClip = clipAtTimeOnTrack(currentTimeRef.current, 1);
 
    if (aud && audioClip && !aud.paused) {
-    // Map audio local time back to global timeline time
-    const tlTime = audioClip.startSec + (aud.currentTime - audioClip.trimStart);
+    // Map audio local time back to global timeline time (account for speed)
+    const audioSpeed = typeof audioClip.speed === "number" && audioClip.speed > 0 ? audioClip.speed : 1;
+    const tlTime = audioClip.startSec + (aud.currentTime - audioClip.trimStart) / audioSpeed;
     currentTimeRef.current = tlTime;
     setCurrentTime(tlTime);
    } else {
@@ -480,6 +481,7 @@ const syncAudioToTime = useCallback((t: number) => {
  const handleRenameStart=(clipId:string)=>{const clip=clips.find(c=>c.id===clipId);if(!clip)return;setRenamingId(clipId);setRenameValue(clip.label);setContextMenu(null);};
  const handleRenameCommit=()=>{if(!renamingId)return;setClips(prev=>prev.map(c=>c.id===renamingId?{...c,label:renameValue}:c));setRenamingId(null);};
  const handleRazorFromMenu=(clipId:string)=>{const clip=clips.find(c=>c.id===clipId);if(!clip||!contextMenu||!tlRef.current)return;const rect=tlRef.current.getBoundingClientRect();razorCut(clipId,Math.max(0,(contextMenu.x-rect.left+tlRef.current.scrollLeft)/zoom));setContextMenu(null);};
+ const handleDuplicateFromMenu=(clipId:string)=>{const clip=clips.find(c=>c.id===clipId);if(!clip)return;const visDur=clip.durationSec-clip.trimStart-clip.trimEnd;const newClip:TimelineClip={...clip,id:uid(),startSec:clip.startSec+visDur,label:`${clip.label} (copy)`};pushHistory(clipsRef.current);setClips(prev=>[...prev,newClip]);setSelectedId(newClip.id);setContextMenu(null);};
 
  const scrubRef=useRef(false);
  useEffect(()=>{
@@ -2287,11 +2289,17 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
       </div>
 
       {/* Text track canvas */}
-      <div style={{height:52,borderBottom:"1px solid #0d0f12",position:"relative",background:"#0c0a14"}} onClick={()=>{setSelectedId(null);setSelectedTextId(null);}}>
+      <div style={{height:52,borderBottom:"1px solid #0d0f12",position:"relative",background:"#0c0a14"}} onClick={()=>{setSelectedId(null);setSelectedTextId(null);setSelectedListId(null);}}>
        {textClips.filter(tc=>!tc.subtitle).map(tc=>{const w=Math.max(tc.durationSec*zoom,4);const isSel=tc.id===selectedTextId;const isBulk=isBulkSelectedText(tc);return(
         <div id={`tclip-${tc.id}`} key={tc.id} onMouseDown={e=>onTextClipMouseDown(e,tc.id)} style={{position:"absolute",left:tc.startSec*zoom,top:4,width:w,height:44,background:(isSel||isBulk)?"#4c1d95bb":"#2e1065bb",border:`1.5px solid ${(isSel||isBulk)?"#a78bfa":"#7c3aed"}`,boxShadow:isBulk?"0 0 0 1px #a78bfa inset":"none",borderRadius:6,overflow:"hidden",cursor:"grab",boxSizing:"border-box",display:"flex",alignItems:"center",paddingLeft:8,fontSize:11,color:"#ddd6fe",zIndex:isSel?5:1}}>
          T {tc.label}
          <div onMouseDown={e=>{e.preventDefault();e.stopPropagation();const od=tc.durationSec,sx=e.clientX;const om=(ev:MouseEvent)=>setTextClips(prev=>prev.map(c=>c.id===tc.id?{...c,durationSec:Math.max(0.5,od+(ev.clientX-sx)/zoom)}:c));const ou=()=>{window.removeEventListener("mousemove",om);window.removeEventListener("mouseup",ou);};window.addEventListener("mousemove",om);window.addEventListener("mouseup",ou);}} style={{position:"absolute",right:0,top:0,bottom:0,width:7,background:"rgba(167,139,250,0.4)",cursor:"ew-resize",borderRadius:"0 4px 4px 0"}}/>
+        </div>
+       );})}
+       {listClips.map(lc=>{const w=Math.max(lc.durationSec*zoom,4);const isSel=lc.id===selectedListId;return(
+        <div id={`lclip-${lc.id}`} key={lc.id} onMouseDown={e=>onListClipMouseDown(e,lc.id)} style={{position:"absolute",left:lc.startSec*zoom,top:4,width:w,height:44,background:isSel?"#14532dbb":"#052e16bb",border:`1.5px solid ${isSel?"#22c55e":"#16a34a"}`,borderRadius:6,overflow:"hidden",cursor:"grab",boxSizing:"border-box",display:"flex",alignItems:"center",paddingLeft:8,fontSize:11,color:"#86efac",zIndex:isSel?5:1}}>
+         ≡ {lc.items.length} items
+         <div onMouseDown={e=>{e.preventDefault();e.stopPropagation();const od=lc.durationSec,sx=e.clientX;const om=(ev:MouseEvent)=>setListClips(prev=>prev.map(c=>c.id===lc.id?{...c,durationSec:Math.max(0.5,od+(ev.clientX-sx)/zoom)}:c));const ou=()=>{window.removeEventListener("mousemove",om);window.removeEventListener("mouseup",ou);};window.addEventListener("mousemove",om);window.addEventListener("mouseup",ou);}} style={{position:"absolute",right:0,top:0,bottom:0,width:7,background:"rgba(34,197,94,0.4)",cursor:"ew-resize",borderRadius:"0 4px 4px 0"}}/>
         </div>
        );})}
       </div>
@@ -2302,7 +2310,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
        <div key={tr.id} onDragEnter={e=>onTrackDragEnter(e,tr.id)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,tr.id)} style={{height:52,borderBottom:"1px solid #0d0f12",position:"relative",background:dropTarget===tr.id?"#0d2218":"#0a0b0e",boxShadow:dropTarget===tr.id?"inset 0 0 0 1px #22c55e":"none",transition:"background 0.08s"}}>
         {dropTarget===tr.id&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:10}}><span style={{fontSize:11,color:"#22c55e",background:"rgba(0,0,0,0.6)",padding:"2px 10px",borderRadius:4}}>Drop here</span></div>}
         {clips.filter(c=>c.track===tr.id).map(clip=>{const visDur=clip.durationSec-clip.trimStart-clip.trimEnd;const w=Math.max(visDur*zoom,4);const isSel=clip.id===selectedId;return(
-         <div id={`clip-${clip.id}`} key={clip.id} onMouseDown={e=>onClipMouseDown(e,clip.id)} onClick={e=>onClipClick(e,clip.id)} onContextMenu={e=>{e.preventDefault();e.stopPropagation();setContextMenu({x:e.clientX,y:e.clientY,clipId:clip.id});}} style={{position:"absolute",left:clip.startSec*zoom,top:4,width:w,height:44,background:clip.color+"bb",border:`1.5px solid ${isSel?"#fff":clip.color}`,borderRadius:6,overflow:"hidden",cursor:tool==="razor"?"crosshair":"grab",boxShadow:isSel?"0 0 0 1px white":"none",zIndex:isSel?5:1}}>
+         <div id={`clip-${clip.id}`} key={clip.id} onMouseDown={e=>onClipMouseDown(e,clip.id)} onClick={e=>onClipClick(e,clip.id)} onContextMenu={e=>{e.preventDefault();e.stopPropagation();setContextMenu({x:e.clientX,y:e.clientY,clipId:clip.id});}} style={{position:"absolute",left:clip.startSec*zoom,top:4,width:w,height:44,background:clip.color+"bb",border:`1.5px solid ${isSel?"#fff":clip.color}`,borderRadius:6,overflow:"hidden",cursor:tool==="razor"?"crosshair":"grab",boxShadow:isSel?"0 0 0 1px white":"none",zIndex:isSel?5:1,outline:highlightIds.has(clip.id)?"2px solid #facc15":"none"}}>
           <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",padding:"0 2px",overflow:"hidden"}}>{Array.from({length:Math.floor(w/4)},(_,i)=><div key={i} style={{width:2,flexShrink:0,marginRight:2,height:`${25+Math.abs(Math.sin(i*0.7))*20}%`,background:"rgba(255,255,255,0.32)",borderRadius:1}}/>)}</div>
           <div style={{position:"absolute",top:3,left:6,fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.9)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:w-14,textShadow:"0 1px 3px rgba(0,0,0,0.8)"}}>{clip.label}</div>
           {w>64&&<div style={{position:"absolute",bottom:3,right:6,fontSize:9,color:"rgba(255,255,255,0.45)",fontFamily:"monospace"}}>{fmt(visDur)}</div>}
@@ -2352,7 +2360,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
        <div key={tr.id} onDragEnter={e=>onTrackDragEnter(e,tr.id)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,tr.id)} style={{height:52,borderBottom:"1px solid #0d0f12",position:"relative",background:dropTarget===tr.id?"#0d2218":"#09090c",boxShadow:dropTarget===tr.id?"inset 0 0 0 1px #22c55e":"none",transition:"background 0.08s"}}>
         {dropTarget===tr.id&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:10}}><span style={{fontSize:11,color:"#22c55e",background:"rgba(0,0,0,0.6)",padding:"2px 10px",borderRadius:4}}>Drop here</span></div>}
         {clips.filter(c=>c.track===tr.id).map(clip=>{const visDur=clip.durationSec-clip.trimStart-clip.trimEnd;const w=Math.max(visDur*zoom,4);const isSel=clip.id===selectedId;return(
-         <div id={`clip-${clip.id}`} key={clip.id} onMouseDown={e=>onClipMouseDown(e,clip.id)} onClick={e=>onClipClick(e,clip.id)} onContextMenu={e=>{e.preventDefault();e.stopPropagation();setContextMenu({x:e.clientX,y:e.clientY,clipId:clip.id});}} style={{position:"absolute",left:clip.startSec*zoom,top:4,width:w,height:44,background:clip.color+"bb",border:`1.5px solid ${isSel?"#fff":clip.color}`,borderRadius:6,overflow:"hidden",cursor:tool==="razor"?"crosshair":"grab",boxShadow:isSel?"0 0 0 1px white":"none",zIndex:isSel?5:1}}>
+         <div id={`clip-${clip.id}`} key={clip.id} onMouseDown={e=>onClipMouseDown(e,clip.id)} onClick={e=>onClipClick(e,clip.id)} onContextMenu={e=>{e.preventDefault();e.stopPropagation();setContextMenu({x:e.clientX,y:e.clientY,clipId:clip.id});}} style={{position:"absolute",left:clip.startSec*zoom,top:4,width:w,height:44,background:clip.color+"bb",border:`1.5px solid ${isSel?"#fff":clip.color}`,borderRadius:6,overflow:"hidden",cursor:tool==="razor"?"crosshair":"grab",boxShadow:isSel?"0 0 0 1px white":"none",zIndex:isSel?5:1,outline:highlightIds.has(clip.id)?"2px solid #facc15":"none"}}>
           <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",padding:"0 2px",overflow:"hidden"}}>{Array.from({length:Math.floor(w/4)},(_,i)=><div key={i} style={{width:2,flexShrink:0,marginRight:2,height:`${25+Math.abs(Math.sin(i*0.7))*20}%`,background:"rgba(255,255,255,0.32)",borderRadius:1}}/>)}</div>
           <div style={{position:"absolute",top:3,left:6,fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.9)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:w-14,textShadow:"0 1px 3px rgba(0,0,0,0.8)"}}>{clip.label}</div>
           {w>64&&<div style={{position:"absolute",bottom:3,right:6,fontSize:9,color:"rgba(255,255,255,0.45)",fontFamily:"monospace"}}>{fmt(visDur)}</div>}
@@ -2370,7 +2378,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
    {/* Context menu */}
    {contextMenu&&(()=>{const clip=clips.find(c=>c.id===contextMenu.clipId);if(!clip)return null;const partner=findPartner(clip);return(
     <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:contextMenu.y,left:contextMenu.x,background:"#1a1b1f",border:"1px solid #374151",borderRadius:8,padding:"4px 0",zIndex:1000,minWidth:160,boxShadow:"0 8px 24px rgba(0,0,0,0.6)",fontSize:13,color:"#e2e8f0"}}>
-     {[{label:partner?"Unlink audio/video":"Unlink (no pair)",disabled:!partner,onClick:()=>handleUnlink(contextMenu.clipId)},{label:"Delete clip",onClick:()=>handleDeleteFromMenu(contextMenu.clipId),danger:true},{label:"Rename clip",onClick:()=>handleRenameStart(contextMenu.clipId)},{label:"Cut here",onClick:()=>handleRazorFromMenu(contextMenu.clipId)}].map(item=>(
+     {[{label:partner?"Unlink audio/video":"Unlink (no pair)",disabled:!partner,onClick:()=>handleUnlink(contextMenu.clipId)},{label:"Duplicate clip",onClick:()=>handleDuplicateFromMenu(contextMenu.clipId)},{label:"Rename clip",onClick:()=>handleRenameStart(contextMenu.clipId)},{label:"Cut here",onClick:()=>handleRazorFromMenu(contextMenu.clipId)},{label:"Delete clip",onClick:()=>handleDeleteFromMenu(contextMenu.clipId),danger:true}].map(item=>(
       <div key={item.label} onClick={item.disabled?undefined:item.onClick} style={{padding:"7px 16px",cursor:item.disabled?"default":"pointer",opacity:item.disabled?0.4:1,color:(item as any).danger?"#ef4444":"inherit"}}
        onMouseEnter={e=>{if(!item.disabled)(e.currentTarget as HTMLDivElement).style.background="#26282e";}} onMouseLeave={e=>{(e.currentTarget as HTMLDivElement).style.background="transparent";}}>{item.label}</div>
      ))}

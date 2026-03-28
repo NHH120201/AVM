@@ -109,6 +109,7 @@ export const App: React.FC = () => {
   const [editorTimeline, setEditorTimeline] = useState<TimelineClip[] | null>(null);
   const [editorTextClips, setEditorTextClips] = useState<TextClip[] | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportDialogTitle, setExportDialogTitle] = useState("");
   const [exporting, setExporting] = useState(false);
   const [exportQuality, setExportQuality] = useState<"draft" | "good" | "high">("good");
   const [exportResolution, setExportResolution] = useState("1080x1920");
@@ -1084,7 +1085,8 @@ export const App: React.FC = () => {
                 <label style={{ fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>Title</label>
                 <input
                   type="text"
-                  defaultValue={topicTag || "New project"}
+                  value={exportDialogTitle}
+                  onChange={(e) => setExportDialogTitle(e.target.value)}
                   disabled={disabled}
                   style={{
                     background: "#020617",
@@ -1330,7 +1332,7 @@ export const App: React.FC = () => {
                       outputFolder: downloadFolder,
                       quality: exportQuality,
                       resolution: exportResolution,
-                      title: topicTag || "New project",
+                      title: exportDialogTitle || topicTag || "New project",
                       codec: exportCodec,
                       fps: exportFps,
                       bitrateMode: exportBitrateMode,
@@ -2211,6 +2213,7 @@ export const App: React.FC = () => {
           savedEditorTextClips.current = textClips;
           setEditorTimeline(arrangedClips);
           setEditorTextClips(textClips);
+          setExportDialogTitle(topicTag || "New project");
           setExportDialogOpen(true);
         }}
         onClose={(currentClips, textClips) => {

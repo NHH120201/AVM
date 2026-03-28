@@ -378,8 +378,13 @@ export async function exportTimeline(opts: ExportTimelineOptions): Promise<{ out
     child.stdout.on("data", (d) => console.log("[EXPORT stdout]", d.toString()));
     child.stderr.on("data", (d) => console.log("[EXPORT stderr]", d.toString()));
     child.on("exit", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exited with code ${code}`));
+      if (code === 0) {
+        resolve();
+      } else {
+        // Clean up partial output file so it doesn't look like a valid export
+        try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch {}
+        reject(new Error(`ffmpeg exited with code ${code}`));
+      }
     });
   });
 
