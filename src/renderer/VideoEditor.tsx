@@ -261,6 +261,7 @@ const syncAudioToTime = useCallback((t: number) => {
 
   const url = `file:///${clip.path.replace(/\\/g, "/")}`;
   const offset = Math.max(0, t - clip.startSec + clip.trimStart);
+  const audPlaybackRate = typeof clip.speed === "number" && clip.speed > 0 ? clip.speed : 1;
 
   // 2. ONLY update the source if it's a different file
   if (aud.src !== url) {
@@ -271,15 +272,17 @@ const syncAudioToTime = useCallback((t: number) => {
 
     const onReady = () => {
       audioLoadingRef.current = false;
+      aud.playbackRate = audPlaybackRate;
       aud.currentTime = offset;
       aud.volume = volume / 100;
       // Important: If we are 'playing', start the new source immediately
-      if (playingRef.current) aud.play().catch(() => {}); 
+      if (playingRef.current) aud.play().catch(() => {});
       aud.removeEventListener("canplay", onReady);
     };
     aud.addEventListener("canplay", onReady);
   } else {
-    // 3. CRITICAL SYNC FIX: 
+    aud.playbackRate = audPlaybackRate;
+    // 3. CRITICAL SYNC FIX:
     // Only 'jump' the audio time if it drifts by more than 0.1 seconds.
     // If we set it every frame, the audio will NEVER play sound!
     if (Math.abs(aud.currentTime - offset) > 0.1) {
@@ -301,13 +304,14 @@ const syncAudioToTime = useCallback((t: number) => {
    const masterVol = volume / 100;
    const targetVol = Math.max(0, Math.min(1, clipVol * masterVol));
    if(Math.abs(vid.volume - targetVol) > 0.01) vid.volume = targetVol;
-   const tlTime=clip.startSec+(vid.currentTime-clip.trimStart);
+   const clipSpeed = typeof clip.speed === "number" && clip.speed > 0 ? clip.speed : 1;
+   const tlTime=clip.startSec+(vid.currentTime-clip.trimStart)/clipSpeed;
    if(Math.abs(tlTime-currentTimeRef.current)>0.001){currentTimeRef.current=tlTime;setCurrentTime(tlTime);}
    const clipEnd=clip.startSec+clip.durationSec-clip.trimStart-clip.trimEnd;
    if(tlTime>=clipEnd-0.05){
     const nextClip=clipsRef.current.filter(c=>c.track===0&&c.startSec>clip.startSec).sort((a,b)=>a.startSec-b.startSec)[0];
     if(nextClip){syncVideoToTime(nextClip.startSec);currentTimeRef.current=nextClip.startSec;setCurrentTime(nextClip.startSec);if(playingRef.current)vid.play().catch(()=>{});}
-    else{vid.pause();setPlaying(false);setCurrentTime(0);currentTimeRef.current=0;return;}
+    else{vid.pause();cancelAnimationFrame(rafRef.current);setPlaying(false);setCurrentTime(0);currentTimeRef.current=0;return;}
    }
   } else if (!clip && playingRef.current) {
    // No video clip under the playhead. If there is audio, let audio drive time.
@@ -322,6 +326,7 @@ const syncAudioToTime = useCallback((t: number) => {
    } else {
     // No media driving the clock; stop at timeline end
     if (currentTimeRef.current >= totalDurRef.current) {
+     cancelAnimationFrame(rafRef.current);
      setPlaying(false);
      setCurrentTime(0);
      currentTimeRef.current = 0;

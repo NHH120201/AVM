@@ -2215,7 +2215,10 @@ export const App: React.FC = () => {
         }}
         onClose={(currentClips, textClips) => {
           savedEditorTimeline.current = currentClips;
-          savedEditorTextClips.current = textClips;  //â† saves on Back to App
+          savedEditorTextClips.current = textClips;
+          // Also persist into state so the App export dialog sees the latest clips
+          setEditorTimeline(currentClips);
+          setEditorTextClips(textClips);
           setEditorOpen(false);
         }}
       />

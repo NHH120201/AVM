@@ -24,6 +24,7 @@ export interface ExportTimelineOptions {
   fps?: string;
   sampleRate?: string; // "44100" | "48000"
   audioChannels?: "stereo" | "mono" | string;
+  quality?: "draft" | "good" | "high"; // maps to CRF value
   avmRoot: string;
 }
 
@@ -44,6 +45,7 @@ export async function exportTimeline(opts: ExportTimelineOptions): Promise<{ out
     fps,
     sampleRate,
     audioChannels,
+    quality,
     avmRoot,
   } = opts;
 
@@ -138,12 +140,18 @@ export async function exportTimeline(opts: ExportTimelineOptions): Promise<{ out
 
   const audioExtraCount = audioSegments.length;
 
-  // [0:v][0:a][1:v][1:a]...concat=n=N:v=1:a=1[vcat][acat]
-  // Each video clip on track 0 is expected to have both a video and an audio stream.
-  // Clips that are audio-only (no video stream) should not be placed on track 0.
-  const concatInputs = Array.from({ length: videoCount }, (_, i) => `[${i}:v][${i}:a]`).join("");
-
-  let filter = `${concatInputs}concat=n=${videoCount}:v=1:a=1[vcat][acat]`;
+  // Build concat filter.
+  // FFmpeg concat filter requires n>=2; for a single clip we use null/anull to rename
+  // the streams to [vcat][acat] so the rest of the filter graph stays identical.
+  let filter: string;
+  if (videoCount === 1) {
+    filter = `[0:v]null[vcat];[0:a]anull[acat]`;
+  } else {
+    // [0:v][0:a][1:v][1:a]...concat=n=N:v=1:a=1[vcat][acat]
+    // Each video clip on track 0 is expected to have both a video and an audio stream.
+    const concatInputs = Array.from({ length: videoCount }, (_, i) => `[${i}:v][${i}:a]`).join("");
+    filter = `${concatInputs}concat=n=${videoCount}:v=1:a=1[vcat][acat]`;
+  }
 
   // If there are extra audio track segments, delay and mix them on top of [acat]
   if (audioExtraCount > 0) {
@@ -249,11 +257,24 @@ export async function exportTimeline(opts: ExportTimelineOptions): Promise<{ out
 
   filter += `;[vscaled]fps=${targetFps}[vout]`;
 
+  // Map quality preset → CRF value (lower = better quality / larger file)
+  // libvpx-vp9 uses -crf differently (also needs -b:v 0), skip it for VP9.
+  const crfMap: Record<string, number> = { draft: 32, good: 23, high: 18 };
+  const crf = crfMap[quality ?? "good"] ?? 23;
+
+  const videoQualityArgs: string[] = [];
+  if (vCodec === "libx264" || vCodec === "libx265") {
+    videoQualityArgs.push("-crf", String(crf));
+  } else if (vCodec === "libvpx-vp9") {
+    videoQualityArgs.push("-crf", String(crf), "-b:v", "0");
+  }
+
   ffArgs.push(
     "-filter_complex", filter,
     "-map", "[vout]",
     "-map", "[aout]",
     "-c:v", vCodec,
+    ...videoQualityArgs,
     "-c:a", "aac",
     "-ar", sr,
     "-ac", ac,

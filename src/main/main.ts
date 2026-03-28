@@ -289,6 +289,7 @@ ipcMain.handle("video:exportTimeline", async (_event, rawArgs: any) => {
     sampleRate,
     audioChannels,
     textClips,
+    quality,
   } = rawArgs as {
     clips: EditorTimelineClip[];
     outputFolder: string;
@@ -299,6 +300,7 @@ ipcMain.handle("video:exportTimeline", async (_event, rawArgs: any) => {
     sampleRate?: string;
     audioChannels?: "stereo" | "mono" | string;
     textClips?: any[];
+    quality?: "draft" | "good" | "high";
   };
 
   if (!clips || clips.length === 0) {
@@ -315,6 +317,7 @@ ipcMain.handle("video:exportTimeline", async (_event, rawArgs: any) => {
     fps,
     sampleRate,
     audioChannels,
+    quality,
     avmRoot: AVM_ROOT,
   });
 });
