@@ -111,9 +111,14 @@ function buildAssFromVoskJson(
   voskJsonPath: string,
   opts: { font?: string; size?: number; color?: string; position?: "bottom"|"middle"|"top" }
 ): string {
+  let parsedVosk: any;
+  try {
+    parsedVosk = JSON.parse(fs.readFileSync(voskJsonPath, "utf8"));
+  } catch (e) {
+    throw new Error(`Failed to parse Vosk JSON at ${voskJsonPath}: ${e}`);
+  }
   const words: { word: string; start: number; end: number }[] =
-    Array.isArray(JSON.parse(fs.readFileSync(voskJsonPath, "utf8")).words)
-      ? JSON.parse(fs.readFileSync(voskJsonPath, "utf8")).words : [];
+    Array.isArray(parsedVosk.words) ? parsedVosk.words : [];
   const OFFSET = 0.21;
   const chunks: { start: number; end: number; text: string }[] = [];
   for (let i = 0; i < words.length; i += 3) {

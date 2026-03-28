@@ -5,10 +5,14 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("pipeline:run", params),
 
   onLog: (callback: (line: string) => void) => {
+    // Remove any previous listener before adding a new one to prevent accumulation
+    // on repeated calls (e.g. if App remounts in hot-reload or test scenarios).
+    ipcRenderer.removeAllListeners("pipeline:log");
     ipcRenderer.on("pipeline:log", (_event, line: string) => callback(line));
   },
 
   onStep: (callback: (data: { step: string; status: string }) => void) => {
+    ipcRenderer.removeAllListeners("pipeline:step");
     ipcRenderer.on("pipeline:step", (_event, data) => callback(data));
   },
 

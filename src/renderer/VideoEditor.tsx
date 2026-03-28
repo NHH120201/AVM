@@ -401,7 +401,8 @@ const syncAudioToTime = useCallback((t: number) => {
 
  const onClipMouseDown=(e:React.MouseEvent,id:string)=>{
   if(tool!=="select")return;e.preventDefault();e.stopPropagation();setSelectedId(id);
-  const clip=clips.find(c=>c.id===id)!;
+  const clip=clips.find(c=>c.id===id);
+  if(!clip)return;
   const partner=unlinkedIds.has(clip.id)?null:clips.find(c=>c.id!==id&&c.path===clip.path&&Math.abs(c.startSec-clip.startSec)<0.01&&c.track!==clip.track)??null;
   dragRef.current={id,startX:e.clientX,startSec:clip.startSec};isDraggingClip.current=true;
   const clipEl=document.getElementById(`clip-${id}`);const partnerEl=partner?document.getElementById(`clip-${partner.id}`):null;
@@ -444,7 +445,8 @@ const syncAudioToTime = useCallback((t: number) => {
 
  const onTrimMouseDown=(e:React.MouseEvent,id:string,edge:"start"|"end")=>{
   e.preventDefault();e.stopPropagation();
-  const clip=clips.find(c=>c.id===id)!;
+  const clip=clips.find(c=>c.id===id);
+  if(!clip)return;
   // Snapshot current clips for undo BEFORE the trim begins (not inside onUp where clips is stale)
   const snapshotForUndo = clipsRef.current.slice();
   trimRef.current={id,edge,startX:e.clientX,origTS:clip.trimStart,origTE:clip.trimEnd,origDur:clip.durationSec,origStart:clip.startSec};
@@ -478,7 +480,7 @@ const syncAudioToTime = useCallback((t: number) => {
   setHighlightIds(toHighlight);setTimeout(()=>setHighlightIds(new Set()),1200);setContextMenu(null);
  };
  const handleDeleteFromMenu=(clipId:string)=>{setClips(prev=>{pushHistory(prev);return prev.filter(c=>c.id!==clipId);});setContextMenu(null);};
- const handleRenameStart=(clipId:string)=>{const clip=clips.find(c=>c.id===clipId);if(!clip)return;setRenamingId(clipId);setRenameValue(clip.label);setContextMenu(null);};
+ const handleRenameStart=(clipId:string)=>{const clip=clips.find(c=>c.id===clipId);if(!clip)return;setRenamingId(clipId);setRenameValue(clip.label??clipId);setContextMenu(null);};
  const handleRenameCommit=()=>{if(!renamingId)return;setClips(prev=>prev.map(c=>c.id===renamingId?{...c,label:renameValue}:c));setRenamingId(null);};
  const handleRazorFromMenu=(clipId:string)=>{const clip=clips.find(c=>c.id===clipId);if(!clip||!contextMenu||!tlRef.current)return;const rect=tlRef.current.getBoundingClientRect();razorCut(clipId,Math.max(0,(contextMenu.x-rect.left+tlRef.current.scrollLeft)/zoom));setContextMenu(null);};
  const handleDuplicateFromMenu=(clipId:string)=>{const clip=clips.find(c=>c.id===clipId);if(!clip)return;const visDur=clip.durationSec-clip.trimStart-clip.trimEnd;const newClip:TimelineClip={...clip,id:uid(),startSec:clip.startSec+visDur,label:`${clip.label} (copy)`};pushHistory(clipsRef.current);setClips(prev=>[...prev,newClip]);setSelectedId(newClip.id);setContextMenu(null);};
@@ -1001,7 +1003,7 @@ const handleQwenTts = async () => {
 
 const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
   if(tool!=="select")return;e.preventDefault();e.stopPropagation();setSelectedTextId(id);setBulkTextSelection(null);setSelectedId(null);setSelectedListId(null);
-  const clip=textClips.find(c=>c.id===id)!;const startX=e.clientX;const origStart=clip.startSec;const el=document.getElementById(`tclip-${id}`);let finalSec=origStart;
+  const clip=textClips.find(c=>c.id===id);if(!clip)return;const startX=e.clientX;const origStart=clip.startSec;const el=document.getElementById(`tclip-${id}`);let finalSec=origStart;
   const onMove=(ev:MouseEvent)=>{finalSec=Math.max(0,origStart+(ev.clientX-startX)/zoom);if(el)el.style.left=`${finalSec*zoom}px`;};
   const onUp=()=>{setTextClips(prev=>prev.map(c=>c.id===id?{...c,startSec:finalSec}:c));window.removeEventListener("mousemove",onMove);window.removeEventListener("mouseup",onUp);};
   window.addEventListener("mousemove",onMove);window.addEventListener("mouseup",onUp);
@@ -1009,7 +1011,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
 
  const onListClipMouseDown=(e:React.MouseEvent,id:string)=>{
   if(tool!=="select")return;e.preventDefault();e.stopPropagation();setSelectedListId(id);setSelectedTextId(null);setSelectedId(null);
-  const clip=listClips.find(c=>c.id===id)!;const startX=e.clientX;const origStart=clip.startSec;const el=document.getElementById(`lclip-${id}`);let finalSec=origStart;
+  const clip=listClips.find(c=>c.id===id);if(!clip)return;const startX=e.clientX;const origStart=clip.startSec;const el=document.getElementById(`lclip-${id}`);let finalSec=origStart;
   const onMove=(ev:MouseEvent)=>{finalSec=Math.max(0,origStart+(ev.clientX-startX)/zoom);if(el)el.style.left=`${finalSec*zoom}px`;};
   const onUp=()=>{setListClips(prev=>prev.map(c=>c.id===id?{...c,startSec:finalSec}:c));window.removeEventListener("mousemove",onMove);window.removeEventListener("mouseup",onUp);};
   window.addEventListener("mousemove",onMove);window.addEventListener("mouseup",onUp);
