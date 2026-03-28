@@ -1131,7 +1131,10 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
   window.addEventListener("mousemove",onMove);window.addEventListener("mouseup",onUp);
  };
 
- const tlWidth=Math.max(totalDuration*zoom+300,1200);
+ // Always show at least 30 minutes (1800s) on the timeline ruler
+ const tlWidth=Math.max(Math.max(totalDuration,1800)*zoom+300,1200);
+ // Auto-expand timeline height when extra tracks are added so nothing gets clipped
+ const minTimelineH = 22 + (4 + extraTracks.length) * 52; // ruler + CC + Text + extra + V1 + A1
 
  return (
   <div style={{display:"flex",flexDirection:"column",height:"100vh",width:"100%",background:"#111214",color:"#e2e8f0",fontFamily:"'DM Sans','Segoe UI',sans-serif",overflow:"hidden",userSelect:"none"}}>
@@ -2556,7 +2559,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
    </div>
 
    {/* Timeline */}
-   <div style={{height:timelineHeight,display:"flex",overflow:"hidden",background:"#0d0e11",flexShrink:0,position:"relative"}}>
+   <div style={{height:Math.max(timelineHeight,minTimelineH),display:"flex",overflow:"hidden",background:"#0d0e11",flexShrink:0,position:"relative"}}>
     {/* Resize handle — drag up/down to change timeline height */}
     <div style={{position:"absolute",top:0,left:0,right:0,height:4,cursor:"row-resize",zIndex:40,background:"transparent"}}
      onMouseEnter={e=>(e.currentTarget.style.background="rgba(99,102,241,0.4)")}
