@@ -3,7 +3,7 @@ import ccIcon from "./icon/CC.png";
 import textIcon from "./icon/T.png";
 import videoIcon from "./icon/Video.png";
 import audioIcon from "./icon/Audio.png";
-import { Upload, Music, Type, ArrowLeftRight, Sparkles, Shapes, Scissors, Hand, ZoomIn, Undo2, Redo2, Trash2, SplitSquareHorizontal, Magnet, Film, AlignLeft, AlignCenter, AlignRight } from "lucide-react";
+import { Upload, Music, Type, ArrowLeftRight, Sparkles, Shapes, Scissors, Hand, ZoomIn, Undo2, Redo2, Trash2, SplitSquareHorizontal, Magnet, Film, AlignLeft, AlignCenter, AlignRight, Eye, EyeOff, Link2, Link2Off, Volume2, VolumeX } from "lucide-react";
 import { toast } from "sonner";
 
 export type TransitionType = "dissolve"|"fade_black"|"fade_white"|"wipe_left"|"wipe_right"|"push_left"|"push_right"|"zoom_in"|"zoom_out"|"spin"|"flash"|"glitch";
@@ -177,6 +177,10 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ clips: initialClips=[]
  const [mutedTracks, setMutedTracks] = useState<Set<number>>(new Set());
  const mutedTracksRef = useRef<Set<number>>(new Set());
  useEffect(() => { mutedTracksRef.current = mutedTracks; }, [mutedTracks]);
+ const [hiddenTracks, setHiddenTracks] = useState<Set<number>>(new Set());
+ const toggleHideTrack = useCallback((track: number) => {
+   setHiddenTracks(prev => { const n = new Set(prev); if(n.has(track)) n.delete(track); else n.add(track); return n; });
+ }, []);
  const [autoEditRunning, setAutoEditRunning] = useState(false);
  const [autoEditStatus, setAutoEditStatus] = useState<string[]>([]);
  const [autoEditOpen, setAutoEditOpen] = useState(false);
@@ -231,6 +235,8 @@ const [audioOverlay, setAudioOverlay] = useState<null | "subtitles" | "tts">(nul
  const rafRef = useRef<number>(0);
  const dragRef = useRef<{ id:string; startX:number; startSec:number }|null>(null);
  const isDraggingClip = useRef(false);
+ const dragTrackRef = useRef<number | null>(null);
+ const [dragOverTrack, setDragOverTrack] = useState<number | null>(null);
  const trimRef = useRef<{ id:string; edge:"start"|"end"; startX:number; origTS:number; origTE:number; origDur:number; origStart:number }|null>(null);
  const binDragData = useRef<{ path:string; label:string; color:string; hasAudio?: boolean; durationSec?: number|null }|null>(null);
 
@@ -325,6 +331,18 @@ const [audioOverlay, setAudioOverlay] = useState<null | "subtitles" | "tts">(nul
  useEffect(() => { playingRef.current=playing; }, [playing]);
  useEffect(() => { currentTimeRef.current=currentTime; }, [currentTime]);
  useEffect(() => { totalDurRef.current=totalDuration; }, [totalDuration]);
+
+ useEffect(() => {
+  const el = tlRef.current;
+  if (!el) return;
+  const onWheel = (e: WheelEvent) => {
+   if (!e.ctrlKey) return;
+   e.preventDefault();
+   setZoom(z => Math.max(10, Math.min(500, z * (e.deltaY < 0 ? 1.15 : 0.87))));
+  };
+  el.addEventListener("wheel", onWheel, { passive: false });
+  return () => el.removeEventListener("wheel", onWheel);
+ }, []);
 
  const clipAtTime = (t:number) => clipsRef.current.filter(c=>c.track===0).find(c=>t>=c.startSec&&t<c.startSec+c.durationSec-c.trimStart-c.trimEnd)??null;
  const clipAtTimeOnTrack = (t:number,track:number) => clipsRef.current.filter(c=>c.track===track).find(c=>t>=c.startSec&&t<c.startSec+c.durationSec-c.trimStart-c.trimEnd)??null;
@@ -528,12 +546,31 @@ const syncAudioToTime = useCallback((t: number) => {
    }
    ns=Math.max(minSec,Math.min(maxSec,ns));if(snap)ns=Math.round(ns*4)/4;ns=Math.max(minSec,Math.min(maxSec,ns));finalSec=ns;
    if(clipEl)clipEl.style.left=`${finalSec*zoom}px`;if(partnerEl)partnerEl.style.left=`${finalSec*zoom}px`;
+   // Vertical: detect which track row the mouse is over
+   const tlEl = tlRef.current;
+   if (tlEl) {
+     const tlRect = tlEl.getBoundingClientRect();
+     const relY = ev.clientY - tlRect.top;
+     // Skip ruler (22px) + subtitle row (52px) + text row (52px) = 124px offset
+     const trackRowIndex = Math.floor((relY - 22 - 52 - 52) / 52);
+     const evTracks = [...extraTracks.filter(t=>t.type==="video").map(t=>t.id), 0, 1, ...extraTracks.filter(t=>t.type==="audio").map(t=>t.id)];
+     if (trackRowIndex >= 0 && trackRowIndex < evTracks.length) {
+       const hoverTrack = evTracks[trackRowIndex];
+       if (hoverTrack !== dragTrackRef.current) {
+         dragTrackRef.current = hoverTrack;
+         setDragOverTrack(hoverTrack);
+       }
+     }
+   }
   };
   const onUp=()=>{
    isDraggingClip.current=false;dragRef.current=null;window.removeEventListener("mousemove",onMove);window.removeEventListener("mouseup",onUp);
+   const finalTrack = dragTrackRef.current;
+   dragTrackRef.current = null;
+   setDragOverTrack(null);
    pushHistory(clipsRef.current);
    setClips(prev=>{
-    let updated=prev.map(c=>{if(c.id===id)return{...c,startSec:finalSec};if(partner&&c.id===partner.id)return{...c,startSec:finalSec};return c;});
+    let updated=prev.map(c=>{if(c.id===id)return{...c,startSec:finalSec,...(finalTrack!==null?{track:finalTrack}:{})};if(partner&&c.id===partner.id)return{...c,startSec:finalSec};return c;});
     const draggedClip=updated.find(c=>c.id===id);if(!draggedClip)return updated;
     const oppositeTrack=draggedClip.track===0?1:0;
     const mergeTarget=updated.find(c=>{if(c.track!==oppositeTrack)return false;if(Math.abs(c.startSec-finalSec)>=0.5)return false;return!updated.some(o=>o.id!==c.id&&o.track!==c.track&&Math.abs(o.startSec-c.startSec)<0.01);});
@@ -2581,33 +2618,47 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
       )}
      </div>
      {/* Subtitles track label */}
-     <div style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"center",background:"#374151"}}>
-      <img src={ccIcon} style={{width:20,height:20,objectFit:"contain",filter:"invert(1)"}} />
+     <div style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 6px",background:"#374151"}}>
+      <button onClick={()=>toggleHideTrack(2)} style={{background:"none",border:"none",cursor:"pointer",color:"#fff",padding:0,opacity:hiddenTracks.has(2)?0.3:0.8,display:"flex"}}>{hiddenTracks.has(2)?<EyeOff size={13} strokeWidth={1.5}/>:<Eye size={13} strokeWidth={1.5}/>}</button>
+      <img src={ccIcon} style={{width:16,height:16,objectFit:"contain",filter:"invert(1)",opacity:0.8}} />
      </div>
      {/* Text track label */}
-     <div style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"center",background:"#374151"}}>
-      <img src={textIcon} style={{width:20,height:20,objectFit:"contain",filter:"invert(1)"}} />
+     <div style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 6px",background:"#374151"}}>
+      <button onClick={()=>toggleHideTrack(3)} style={{background:"none",border:"none",cursor:"pointer",color:"#fff",padding:0,opacity:hiddenTracks.has(3)?0.3:0.8,display:"flex"}}>{hiddenTracks.has(3)?<EyeOff size={13} strokeWidth={1.5}/>:<Eye size={13} strokeWidth={1.5}/>}</button>
+      <img src={textIcon} style={{width:16,height:16,objectFit:"contain",filter:"invert(1)",opacity:0.8}} />
      </div>
      {extraTracks.filter(tr=>tr.type==="video").map(tr=>(
-      <div key={tr.id} onDragEnter={e=>onTrackDragEnter(e,tr.id)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,tr.id)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"center",gap:4,background:dropTarget===tr.id?"#1d4ed8":"#1e3a8a",boxShadow:dropTarget===tr.id?"inset 0 0 0 1px #bfdbfe":"none",position:"relative"}}>
-       <img src={videoIcon} style={{width:18,height:18,objectFit:"contain",filter:"invert(1)"}} />
-       <button onClick={e=>{e.stopPropagation();toggleMuteTrack(tr.id);}} title={mutedTracks.has(tr.id)?"Unmute":"Mute"} style={{position:"absolute",bottom:3,right:3,background:"transparent",border:"none",cursor:"pointer",opacity:mutedTracks.has(tr.id)?1:0.4,fontSize:10,color:"#fff",padding:0,lineHeight:1}} onMouseEnter={e=>(e.currentTarget as HTMLElement).style.opacity="1"} onMouseLeave={e=>(e.currentTarget as HTMLElement).style.opacity=mutedTracks.has(tr.id)?"1":"0.4"}>{mutedTracks.has(tr.id)?"🔇":"🔊"}</button>
+      <div key={tr.id} onDragEnter={e=>onTrackDragEnter(e,tr.id)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,tr.id)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 6px",background:dropTarget===tr.id?"#1d4ed8":"#1e3a8a",boxShadow:dropTarget===tr.id?"inset 0 0 0 1px #bfdbfe":"none"}}>
+       <div style={{display:"flex",flexDirection:"column",gap:3}}>
+        <button onClick={e=>{e.stopPropagation();toggleHideTrack(tr.id);}} style={{background:"none",border:"none",cursor:"pointer",color:"#fff",padding:0,opacity:hiddenTracks.has(tr.id)?0.3:0.8,display:"flex"}}>{hiddenTracks.has(tr.id)?<EyeOff size={13} strokeWidth={1.5}/>:<Eye size={13} strokeWidth={1.5}/>}</button>
+        <button onClick={e=>{e.stopPropagation();toggleMuteTrack(tr.id);}} style={{background:"none",border:"none",cursor:"pointer",color:"#fff",padding:0,opacity:mutedTracks.has(tr.id)?0.3:0.8,display:"flex"}}>{mutedTracks.has(tr.id)?<VolumeX size={13} strokeWidth={1.5}/>:<Volume2 size={13} strokeWidth={1.5}/>}</button>
+       </div>
+       <img src={videoIcon} style={{width:16,height:16,objectFit:"contain",filter:"invert(1)",opacity:0.8}} />
       </div>
      ))}
-     {/* Video 1 label (use Video icon) */}
-     <div onDragEnter={e=>onTrackDragEnter(e,0)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,0)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"center",gap:4,background:dropTarget===0?"#1d4ed8":"#1e40af",boxShadow:dropTarget===0?"inset 0 0 0 1px #bfdbfe":"none",position:"relative"}}>
-      <img src={videoIcon} style={{width:18,height:18,objectFit:"contain",filter:"invert(1)"}} />
-      <button onClick={e=>{e.stopPropagation();toggleMuteTrack(0);}} title={mutedTracks.has(0)?"Unmute Video 1":"Mute Video 1"} style={{position:"absolute",bottom:3,right:3,background:"transparent",border:"none",cursor:"pointer",opacity:mutedTracks.has(0)?1:0.4,fontSize:10,color:"#fff",padding:0,lineHeight:1}} onMouseEnter={e=>(e.currentTarget as HTMLElement).style.opacity="1"} onMouseLeave={e=>(e.currentTarget as HTMLElement).style.opacity=mutedTracks.has(0)?"1":"0.4"}>{mutedTracks.has(0)?"🔇":"🔊"}</button>
+     {/* Video 1 label */}
+     <div onDragEnter={e=>onTrackDragEnter(e,0)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,0)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 6px",background:dropTarget===0?"#1d4ed8":"#1e40af",boxShadow:dropTarget===0?"inset 0 0 0 1px #bfdbfe":"none"}}>
+      <div style={{display:"flex",flexDirection:"column",gap:3}}>
+       <button onClick={e=>{e.stopPropagation();toggleHideTrack(0);}} title={hiddenTracks.has(0)?"Show Video 1":"Hide Video 1"} style={{background:"none",border:"none",cursor:"pointer",color:"#fff",padding:0,opacity:hiddenTracks.has(0)?0.3:0.8,display:"flex"}} onMouseEnter={e=>(e.currentTarget as HTMLElement).style.opacity="1"} onMouseLeave={e=>(e.currentTarget as HTMLElement).style.opacity=hiddenTracks.has(0)?"0.3":"0.8"}>{hiddenTracks.has(0)?<EyeOff size={13} strokeWidth={1.5}/>:<Eye size={13} strokeWidth={1.5}/>}</button>
+       <button onClick={e=>{e.stopPropagation();toggleMuteTrack(0);}} title={mutedTracks.has(0)?"Unmute Video 1":"Mute Video 1"} style={{background:"none",border:"none",cursor:"pointer",color:"#fff",padding:0,opacity:mutedTracks.has(0)?0.3:0.8,display:"flex"}} onMouseEnter={e=>(e.currentTarget as HTMLElement).style.opacity="1"} onMouseLeave={e=>(e.currentTarget as HTMLElement).style.opacity=mutedTracks.has(0)?"0.3":"0.8"}>{mutedTracks.has(0)?<VolumeX size={13} strokeWidth={1.5}/>:<Volume2 size={13} strokeWidth={1.5}/>}</button>
+      </div>
+      <img src={videoIcon} style={{width:16,height:16,objectFit:"contain",filter:"invert(1)",opacity:0.8}} />
      </div>
-     {/* Audio 1 label (use Audio icon) */}
-     <div onDragEnter={e=>onTrackDragEnter(e,1)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,1)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"center",gap:4,background:dropTarget===1?"#047857":"#065f46",boxShadow:dropTarget===1?"inset 0 0 0 1px #bbf7d0":"none",position:"relative"}}>
-      <img src={audioIcon} style={{width:18,height:18,objectFit:"contain",filter:"invert(1)"}} />
-      <button onClick={e=>{e.stopPropagation();toggleMuteTrack(1);}} title={mutedTracks.has(1)?"Unmute Audio 1":"Mute Audio 1"} style={{position:"absolute",bottom:3,right:3,background:"transparent",border:"none",cursor:"pointer",opacity:mutedTracks.has(1)?1:0.4,fontSize:10,color:"#fff",padding:0,lineHeight:1}} onMouseEnter={e=>(e.currentTarget as HTMLElement).style.opacity="1"} onMouseLeave={e=>(e.currentTarget as HTMLElement).style.opacity=mutedTracks.has(1)?"1":"0.4"}>{mutedTracks.has(1)?"🔇":"🔊"}</button>
+     {/* Audio 1 label */}
+     <div onDragEnter={e=>onTrackDragEnter(e,1)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,1)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 6px",background:dropTarget===1?"#047857":"#065f46",boxShadow:dropTarget===1?"inset 0 0 0 1px #bbf7d0":"none"}}>
+      <div style={{display:"flex",flexDirection:"column",gap:3}}>
+       <button onClick={e=>{e.stopPropagation();toggleHideTrack(1);}} title={hiddenTracks.has(1)?"Show Audio 1":"Hide Audio 1"} style={{background:"none",border:"none",cursor:"pointer",color:"#fff",padding:0,opacity:hiddenTracks.has(1)?0.3:0.8,display:"flex"}} onMouseEnter={e=>(e.currentTarget as HTMLElement).style.opacity="1"} onMouseLeave={e=>(e.currentTarget as HTMLElement).style.opacity=hiddenTracks.has(1)?"0.3":"0.8"}>{hiddenTracks.has(1)?<EyeOff size={13} strokeWidth={1.5}/>:<Eye size={13} strokeWidth={1.5}/>}</button>
+       <button onClick={e=>{e.stopPropagation();toggleMuteTrack(1);}} title={mutedTracks.has(1)?"Unmute Audio 1":"Mute Audio 1"} style={{background:"none",border:"none",cursor:"pointer",color:"#fff",padding:0,opacity:mutedTracks.has(1)?0.3:0.8,display:"flex"}} onMouseEnter={e=>(e.currentTarget as HTMLElement).style.opacity="1"} onMouseLeave={e=>(e.currentTarget as HTMLElement).style.opacity=mutedTracks.has(1)?"0.3":"0.8"}>{mutedTracks.has(1)?<VolumeX size={13} strokeWidth={1.5}/>:<Volume2 size={13} strokeWidth={1.5}/>}</button>
+      </div>
+      <img src={audioIcon} style={{width:16,height:16,objectFit:"contain",filter:"invert(1)",opacity:0.8}} />
      </div>
      {extraTracks.filter(tr=>tr.type==="audio").map(tr=>(
-      <div key={tr.id} onDragEnter={e=>onTrackDragEnter(e,tr.id)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,tr.id)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"center",gap:4,background:dropTarget===tr.id?"#047857":"#064e3b",boxShadow:dropTarget===tr.id?"inset 0 0 0 1px #bbf7d0":"none",position:"relative"}}>
-       <img src={audioIcon} style={{width:18,height:18,objectFit:"contain",filter:"invert(1)"}} />
-       <button onClick={e=>{e.stopPropagation();toggleMuteTrack(tr.id);}} title={mutedTracks.has(tr.id)?"Unmute":"Mute"} style={{position:"absolute",bottom:3,right:3,background:"transparent",border:"none",cursor:"pointer",opacity:mutedTracks.has(tr.id)?1:0.4,fontSize:10,color:"#fff",padding:0,lineHeight:1}} onMouseEnter={e=>(e.currentTarget as HTMLElement).style.opacity="1"} onMouseLeave={e=>(e.currentTarget as HTMLElement).style.opacity=mutedTracks.has(tr.id)?"1":"0.4"}>{mutedTracks.has(tr.id)?"🔇":"🔊"}</button>
+      <div key={tr.id} onDragEnter={e=>onTrackDragEnter(e,tr.id)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,tr.id)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 6px",background:dropTarget===tr.id?"#047857":"#064e3b",boxShadow:dropTarget===tr.id?"inset 0 0 0 1px #bbf7d0":"none"}}>
+       <div style={{display:"flex",flexDirection:"column",gap:3}}>
+        <button onClick={e=>{e.stopPropagation();toggleHideTrack(tr.id);}} style={{background:"none",border:"none",cursor:"pointer",color:"#fff",padding:0,opacity:hiddenTracks.has(tr.id)?0.3:0.8,display:"flex"}}>{hiddenTracks.has(tr.id)?<EyeOff size={13} strokeWidth={1.5}/>:<Eye size={13} strokeWidth={1.5}/>}</button>
+        <button onClick={e=>{e.stopPropagation();toggleMuteTrack(tr.id);}} style={{background:"none",border:"none",cursor:"pointer",color:"#fff",padding:0,opacity:mutedTracks.has(tr.id)?0.3:0.8,display:"flex"}}>{mutedTracks.has(tr.id)?<VolumeX size={13} strokeWidth={1.5}/>:<Volume2 size={13} strokeWidth={1.5}/>}</button>
+       </div>
+       <img src={audioIcon} style={{width:16,height:16,objectFit:"contain",filter:"invert(1)",opacity:0.8}} />
       </div>
      ))}
     </div>
@@ -2654,7 +2705,10 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
         {dropTarget===tr.id&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:10}}><span style={{fontSize:11,color:"#22c55e",background:"rgba(0,0,0,0.6)",padding:"2px 10px",borderRadius:4}}>Drop here</span></div>}
         {clips.filter(c=>c.track===tr.id).map(clip=>{const visDur=clip.durationSec-clip.trimStart-clip.trimEnd;const w=Math.max(visDur*zoom,4);const isSel=clip.id===selectedId;return(
          <div id={`clip-${clip.id}`} key={clip.id} onMouseDown={e=>onClipMouseDown(e,clip.id)} onClick={e=>onClipClick(e,clip.id)} onContextMenu={e=>{e.preventDefault();e.stopPropagation();setContextMenu({x:e.clientX,y:e.clientY,clipId:clip.id});}} style={{position:"absolute",left:clip.startSec*zoom,top:4,width:w,height:44,background:clip.color+"bb",border:`1.5px solid ${isSel?"#fff":clip.color}`,borderRadius:6,overflow:"hidden",cursor:tool==="razor"?"crosshair":"grab",boxShadow:isSel?"0 0 0 1px white":"none",zIndex:isSel?5:1,outline:highlightIds.has(clip.id)?"2px solid #facc15":"none"}}>
-          <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",padding:"0 2px",overflow:"hidden"}}>{Array.from({length:Math.floor(w/4)},(_,i)=><div key={i} style={{width:2,flexShrink:0,marginRight:2,height:`${25+Math.abs(Math.sin(i*0.7))*20}%`,background:"rgba(255,255,255,0.32)",borderRadius:1}}/>)}</div>
+          {binThumbnails[clip.path]
+          ? <div style={{position:"absolute",inset:0,backgroundImage:`url("${binThumbnails[clip.path]}")`,backgroundRepeat:"repeat-x",backgroundSize:`${Math.round(52*(9/16))}px 100%`,opacity:0.75,borderRadius:4}}/>
+          : <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",padding:"0 2px",overflow:"hidden"}}>{Array.from({length:Math.floor(w/4)},(_,i)=><div key={i} style={{width:2,flexShrink:0,marginRight:2,height:`${25+Math.abs(Math.sin(i*0.7))*20}%`,background:"rgba(255,255,255,0.32)",borderRadius:1}}/>)}</div>
+}
           <div style={{position:"absolute",top:3,left:6,fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.9)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:w-14,textShadow:"0 1px 3px rgba(0,0,0,0.8)"}}>{clip.label}</div>
           {w>64&&<div style={{position:"absolute",bottom:3,right:6,fontSize:9,color:"rgba(255,255,255,0.45)",fontFamily:"monospace"}}>{fmt(visDur)}</div>}
           {isSel&&(<><div onMouseDown={e=>onTrimMouseDown(e,clip.id,"start")} style={{position:"absolute",left:0,top:0,bottom:0,width:7,background:"rgba(255,255,255,0.45)",cursor:"ew-resize",borderRadius:"4px 0 0 4px"}}/><div onMouseDown={e=>onTrimMouseDown(e,clip.id,"end")} style={{position:"absolute",right:0,top:0,bottom:0,width:7,background:"rgba(255,255,255,0.45)",cursor:"ew-resize",borderRadius:"0 4px 4px 0"}}/></>)}
@@ -2664,7 +2718,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
       ))}
 
       {/* Video 1 */}
-      <div onDragEnter={e=>onTrackDragEnter(e,0)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,0)} style={{height:52,borderBottom:"1px solid #0d0f12",position:"relative",background:dropTarget===0?"#0d2218":"#0a0b0e",boxShadow:dropTarget===0?"inset 0 0 0 1px #22c55e":"none",transition:"background 0.08s"}}>
+      <div onDragEnter={e=>onTrackDragEnter(e,0)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,0)} style={{height:52,borderBottom:"1px solid #0d0f12",position:"relative",background:dropTarget===0?"#0d2218":dragOverTrack===0?"rgba(255,255,255,0.06)":"#0a0b0e",boxShadow:dropTarget===0?"inset 0 0 0 1px #22c55e":"none",transition:"background 0.08s"}}>
        {dropTarget===0&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:10}}><span style={{fontSize:11,color:"#22c55e",background:"rgba(0,0,0,0.6)",padding:"2px 10px",borderRadius:4}}>Drop here</span></div>}
        {clips.filter(c=>c.track===0).map(clip=>{const visDur=clip.durationSec-clip.trimStart-clip.trimEnd;const w=Math.max(visDur*zoom,4);const isSel=clip.id===selectedId;return(
         <div id={`clip-${clip.id}`} key={clip.id} onMouseDown={e=>onClipMouseDown(e,clip.id)} onClick={e=>onClipClick(e,clip.id)} onContextMenu={e=>{e.preventDefault();e.stopPropagation();setContextMenu({x:e.clientX,y:e.clientY,clipId:clip.id});}} style={{position:"absolute",left:clip.startSec*zoom,top:4,width:w,height:44,background:clip.color+"bb",border:`1.5px solid ${isSel?"#fff":clip.color}`,borderRadius:6,overflow:"hidden",cursor:tool==="razor"?"crosshair":"grab",boxShadow:isSel?"0 0 0 1px white":"none",zIndex:isSel?5:1,outline:highlightIds.has(clip.id)?"2px solid #facc15":"none"}}>
@@ -2682,7 +2736,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
       </div>
 
       {/* Audio 1 */}
-      <div onDragEnter={e=>onTrackDragEnter(e,1)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,1)} style={{height:52,borderBottom:"1px solid #0d0f12",position:"relative",background:dropTarget===1?"#0d2218":"#09090c",boxShadow:dropTarget===1?"inset 0 0 0 1px #22c55e":"none",transition:"background 0.08s"}}>
+      <div onDragEnter={e=>onTrackDragEnter(e,1)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,1)} style={{height:52,borderBottom:"1px solid #0d0f12",position:"relative",background:dropTarget===1?"#0d2218":dragOverTrack===1?"rgba(255,255,255,0.06)":"#09090c",boxShadow:dropTarget===1?"inset 0 0 0 1px #22c55e":"none",transition:"background 0.08s"}}>
        {dropTarget===1&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:10}}><span style={{fontSize:11,color:"#22c55e",background:"rgba(0,0,0,0.6)",padding:"2px 10px",borderRadius:4}}>Drop here</span></div>}
        {clips.filter(c=>c.track===1).map(clip=>{const visDur=clip.durationSec-clip.trimStart-clip.trimEnd;const w=Math.max(visDur*zoom,4);const isSel=clip.id===selectedId;return(
         <div id={`clip-${clip.id}`} key={clip.id} onMouseDown={e=>onClipMouseDown(e,clip.id)} onClick={e=>onClipClick(e,clip.id)} onContextMenu={e=>{e.preventDefault();e.stopPropagation();setContextMenu({x:e.clientX,y:e.clientY,clipId:clip.id});}} style={{position:"absolute",left:clip.startSec*zoom,top:4,width:w,height:44,background:clip.color+"bb",border:`1.5px solid ${isSel?"#fff":clip.color}`,borderRadius:6,overflow:"hidden",cursor:tool==="razor"?"crosshair":"grab",boxShadow:isSel?"0 0 0 1px white":"none",zIndex:isSel?5:1,outline:highlightIds.has(clip.id)?"2px solid #facc15":"none"}}>
@@ -2704,7 +2758,10 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
         {dropTarget===tr.id&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:10}}><span style={{fontSize:11,color:"#22c55e",background:"rgba(0,0,0,0.6)",padding:"2px 10px",borderRadius:4}}>Drop here</span></div>}
         {clips.filter(c=>c.track===tr.id).map(clip=>{const visDur=clip.durationSec-clip.trimStart-clip.trimEnd;const w=Math.max(visDur*zoom,4);const isSel=clip.id===selectedId;return(
          <div id={`clip-${clip.id}`} key={clip.id} onMouseDown={e=>onClipMouseDown(e,clip.id)} onClick={e=>onClipClick(e,clip.id)} onContextMenu={e=>{e.preventDefault();e.stopPropagation();setContextMenu({x:e.clientX,y:e.clientY,clipId:clip.id});}} style={{position:"absolute",left:clip.startSec*zoom,top:4,width:w,height:44,background:clip.color+"bb",border:`1.5px solid ${isSel?"#fff":clip.color}`,borderRadius:6,overflow:"hidden",cursor:tool==="razor"?"crosshair":"grab",boxShadow:isSel?"0 0 0 1px white":"none",zIndex:isSel?5:1,outline:highlightIds.has(clip.id)?"2px solid #facc15":"none"}}>
-          <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",padding:"0 2px",overflow:"hidden"}}>{Array.from({length:Math.floor(w/4)},(_,i)=><div key={i} style={{width:2,flexShrink:0,marginRight:2,height:`${25+Math.abs(Math.sin(i*0.7))*20}%`,background:"rgba(255,255,255,0.32)",borderRadius:1}}/>)}</div>
+          {binThumbnails[clip.path]
+          ? <div style={{position:"absolute",inset:0,backgroundImage:`url("${binThumbnails[clip.path]}")`,backgroundRepeat:"repeat-x",backgroundSize:`${Math.round(52*(9/16))}px 100%`,opacity:0.75,borderRadius:4}}/>
+          : <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",padding:"0 2px",overflow:"hidden"}}>{Array.from({length:Math.floor(w/4)},(_,i)=><div key={i} style={{width:2,flexShrink:0,marginRight:2,height:`${25+Math.abs(Math.sin(i*0.7))*20}%`,background:"rgba(255,255,255,0.32)",borderRadius:1}}/>)}</div>
+}
           <div style={{position:"absolute",top:3,left:6,fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.9)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:w-14,textShadow:"0 1px 3px rgba(0,0,0,0.8)"}}>{clip.label}</div>
           {w>64&&<div style={{position:"absolute",bottom:3,right:6,fontSize:9,color:"rgba(255,255,255,0.45)",fontFamily:"monospace"}}>{fmt(visDur)}</div>}
           {isSel&&(<><div onMouseDown={e=>onTrimMouseDown(e,clip.id,"start")} style={{position:"absolute",left:0,top:0,bottom:0,width:7,background:"rgba(255,255,255,0.45)",cursor:"ew-resize",borderRadius:"4px 0 0 4px"}}/><div onMouseDown={e=>onTrimMouseDown(e,clip.id,"end")} style={{position:"absolute",right:0,top:0,bottom:0,width:7,background:"rgba(255,255,255,0.45)",cursor:"ew-resize",borderRadius:"0 4px 4px 0"}}/></>)}
