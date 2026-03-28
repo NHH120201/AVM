@@ -99,10 +99,33 @@ const DEFAULT_FONT_OPTIONS = [
   "Verdana",
   "Courier New",
   "Montserrat",
-  "Poppins",
   "Oswald",
   "Anton",
   "Bebas Neue",
+  "Bangers",
+  "Roboto",
+  "Permanent Marker",
+  "Dancing Script",
+  "Pacifico",
+  "Press Start 2P",
+];
+// Subtitle-optimised fonts grouped with labels
+const SUBTITLE_FONTS: { label: string; family: string }[] = [
+  { label: "Arial",           family: "Arial" },
+  { label: "Impact",          family: "Impact" },
+  { label: "Arial Black",     family: "Arial Black" },
+  { label: "Bebas Neue",      family: "Bebas Neue" },
+  { label: "Oswald",          family: "Oswald" },
+  { label: "Anton",           family: "Anton" },
+  { label: "Bangers",         family: "Bangers" },
+  { label: "Montserrat",      family: "Montserrat" },
+  { label: "Roboto",          family: "Roboto" },
+  { label: "Georgia",         family: "Georgia" },
+  { label: "Trebuchet MS",    family: "Trebuchet MS" },
+  { label: "Permanent Marker",family: "Permanent Marker" },
+  { label: "Dancing Script",  family: "Dancing Script" },
+  { label: "Pacifico",        family: "Pacifico" },
+  { label: "Press Start 2P",  family: "Press Start 2P" },
 ];
 type SidePanel = "media"|"text"|"audio"|"transitions"|"effects"|"elements";
 const NAV_ITEMS: { id: SidePanel; label: string; Icon: React.FC<{size?:number|string;strokeWidth?:number|string}> }[] = [
@@ -209,6 +232,17 @@ const [audioOverlay, setAudioOverlay] = useState<null | "subtitles" | "tts">(nul
  const isDraggingClip = useRef(false);
  const trimRef = useRef<{ id:string; edge:"start"|"end"; startX:number; origTS:number; origTE:number; origDur:number; origStart:number }|null>(null);
  const binDragData = useRef<{ path:string; label:string; color:string; hasAudio?: boolean; durationSec?: number|null }|null>(null);
+
+ // Load Google Fonts for subtitle / text use
+ useEffect(() => {
+  const id = "gfonts-subtitle-pack";
+  if (document.getElementById(id)) return;
+  const link = document.createElement("link");
+  link.id = id;
+  link.rel = "stylesheet";
+  link.href = "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Oswald:wght@400;700&family=Anton&family=Bangers&family=Montserrat:wght@400;700&family=Roboto:wght@400;700&family=Dancing+Script:wght@700&family=Permanent+Marker&family=Pacifico&family=Press+Start+2P&display=swap";
+  document.head.appendChild(link);
+ }, []);
 
  useEffect(() => {
   const newPaths = binClips.map(c => c.path).filter(p => !binThumbnails[p]);
@@ -1834,7 +1868,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
                       <span style={{ fontSize: 10, color: "#6b7280" }}>Font:</span>
                       <select value={subFont} onChange={e => setSubFont(e.target.value)}
                         style={{ background: "#1a1b1f", border: "1px solid #374151", color: "#e2e8f0", borderRadius: 4, padding: "2px 6px", fontSize: 10 }}>
-                        {["Arial","Impact","Georgia","Trebuchet MS","Arial Black"].map(f => <option key={f}>{f}</option>)}
+                        {SUBTITLE_FONTS.map(f => <option key={f.family} value={f.family}>{f.label}</option>)}
                       </select>
                       <select value={subFontSize} onChange={e => setSubFontSize(+e.target.value)}
                         style={{ background: "#1a1b1f", border: "1px solid #374151", color: "#e2e8f0", borderRadius: 4, padding: "2px 6px", fontSize: 10 }}>
@@ -2040,39 +2074,17 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
                       <option value="ru">Russian</option>
                     </select>
                   </div>
-                  <div style={{ width: 120 }}>
-                    <div
-                      style={{
-                        fontSize: 9,
-                        color: "#6b7280",
-                        marginBottom: 4,
-                      }}
-                    >
-                      MAX WORDS
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
+                      <span>WORDS PER SUBTITLE</span>
+                      <span style={{ color: "#22d3ee", fontWeight: 600 }}>{maxSubtitleWords} words</span>
                     </div>
-                    <input
-                      type="number"
-                      min={2}
-                      max={30}
-                      value={maxSubtitleWords}
-                      onChange={(e) =>
-                        setMaxSubtitleWords(
-                          Math.max(
-                            1,
-                            Math.min(30, Number(e.target.value) || 10)
-                          )
-                        )
-                      }
-                      style={{
-                        width: "100%",
-                        background: "#111214",
-                        border: "1px solid #374151",
-                        borderRadius: 6,
-                        color: "#e2e8f0",
-                        padding: "5px 8px",
-                        fontSize: 11,
-                      }}
-                    />
+                    <input type="range" min={2} max={20} value={maxSubtitleWords}
+                      onChange={e => setMaxSubtitleWords(+e.target.value)}
+                      style={{ width: "100%", accentColor: "#22d3ee" }} />
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#4b5563", marginTop: 2 }}>
+                      <span>2 — Short</span><span>10 — Medium</span><span>20 — Long</span>
+                    </div>
                   </div>
                 </div>
                 {/* Subtitle Style Options */}
@@ -2084,15 +2096,15 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
                     <div style={{ flex: 2 }}>
                       <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 3 }}>Font</div>
                       <select value={subFont} onChange={e => setSubFont(e.target.value)}
-                        style={{ width: "100%", background: "#1a1b1f", border: "1px solid #374151", color: "#e2e8f0", borderRadius: 5, padding: "4px 6px", fontSize: 12 }}>
-                        {["Arial","Impact","Georgia","Trebuchet MS","Arial Black","Verdana"].map(f => <option key={f}>{f}</option>)}
+                        style={{ width: "100%", background: "#1a1b1f", border: "1px solid #374151", color: "#e2e8f0", borderRadius: 5, padding: "4px 6px", fontSize: 13, fontFamily: subFont }}>
+                        {SUBTITLE_FONTS.map(f => <option key={f.family} value={f.family} style={{ fontFamily: f.family }}>{f.label}</option>)}
                       </select>
                     </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 3 }}>Size</div>
                       <select value={subFontSize} onChange={e => setSubFontSize(+e.target.value)}
                         style={{ width: "100%", background: "#1a1b1f", border: "1px solid #374151", color: "#e2e8f0", borderRadius: 5, padding: "4px 6px", fontSize: 12 }}>
-                        {[20,24,28,32,36,42,48].map(s => <option key={s} value={s}>{s}px</option>)}
+                        {[18,22,26,30,34,38,44,52].map(s => <option key={s} value={s}>{s}px</option>)}
                       </select>
                     </div>
                     <div style={{ flex: 1 }}>
@@ -2446,6 +2458,21 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
          </div>
         );
        })}
+
+       {/* Live subtitle style preview — shown while configuring in the Whisper panel */}
+       {audioOverlay === "subtitles" && (()=>{
+        const s = TEXT_STYLES.find(st => st.id === subStyle) ?? TEXT_STYLES[0];
+        return (
+         <div style={{position:"absolute",left:"50%",top:`${subPosition}%`,transform:"translate(-50%,-50%)",pointerEvents:"none",zIndex:50,textAlign:"center",maxWidth:"90%",width:"90%"}}>
+          <div style={{ position:"absolute",top:-18,left:"50%",transform:"translateX(-50%)",background:"rgba(99,102,241,0.85)",color:"#fff",fontSize:9,padding:"2px 7px",borderRadius:3,whiteSpace:"nowrap",fontFamily:"system-ui",letterSpacing:"0.05em" }}>PREVIEW</div>
+          <div style={{...s.wrapStyle,display:"inline-flex",alignItems:"center",justifyContent:"center"}}>
+           <span style={{...s.textStyle,fontFamily:subFont,fontSize:subFontSize,color:s.id==="plain"?subColor:(s.textStyle as React.CSSProperties).color,whiteSpace:"nowrap"}}>
+            Sample subtitle text
+           </span>
+          </div>
+         </div>
+        );
+       })()}
       </div>
      </div>
 
