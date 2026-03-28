@@ -1888,6 +1888,10 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
                           style={{ background: subPosition === p.y ? "#1e3a5f" : "#1a1b1f", border: `1px solid ${subPosition === p.y ? "#3b82f6" : "#374151"}`, color: subPosition === p.y ? "#93c5fd" : "#6b7280", borderRadius: 4, padding: "2px 7px", fontSize: 10, cursor: "pointer" }}>{p.label}</button>
                       ))}
                     </div>
+                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:"#6b7280" }}>
+                      <span>Words per clip</span><span style={{color:"#22d3ee",fontWeight:600}}>{maxSubtitleWords}</span>
+                    </div>
+                    <input type="range" min={2} max={20} value={maxSubtitleWords} onChange={e=>setMaxSubtitleWords(+e.target.value)} style={{width:"100%",accentColor:"#22d3ee"}}/>
                     <div style={{ fontSize: 10, color: "#4b5563" }}>Uses Whisper AI — requires video with speech</div>
                   </div>
                 )}
