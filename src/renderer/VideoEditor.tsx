@@ -142,6 +142,9 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ clips: initialClips=[]
  const [selectedElementId, setSelectedElementId] = useState<string|null>(null);
  const [mediaSearch, setMediaSearch] = useState("");
  const [exportTitle, setExportTitle] = useState("My project");
+ const [autoEditRunning, setAutoEditRunning] = useState(false);
+ const [autoEditStatus, setAutoEditStatus] = useState<string[]>([]);
+ const [autoEditOpen, setAutoEditOpen] = useState(false);
 
  // Local export dialog state (editor-owned export)
  const [exportOpen, setExportOpen] = useState(false);
@@ -618,22 +621,30 @@ const syncAudioToTime = useCallback((t: number) => {
  };
 
  const handleWhisperGenerate = async () => {
-  const videoClip = clips.find(c => c.track === 0);
-  if (!videoClip) return;
+  const videoClips = clips.filter(c => c.track === 0).sort((a, b) => a.startSec - b.startSec);
+  if (!videoClips.length) return;
   setWhisperRunning(true);
-  setWhisperStatus("Running Whisper — this may take a minute...");
+  setWhisperStatus(`Running Whisper on ${videoClips.length} clip(s)...`);
   try {
     const api = (window as any).api;
-    const result = await api.whisperTranscribe({
-      videoPath: videoClip.path,
-      language: whisperLang === "auto" ? undefined : whisperLang,
-    });
-    const segments: {
-      start: number;
-      end: number;
-      text: string;
-      words?: { start: number; end: number; word: string }[];
-    }[] = result.segments;
+    const allSegments: { start: number; end: number; text: string; words?: { start: number; end: number; word: string }[] }[] = [];
+    for (const videoClip of videoClips) {
+      setWhisperStatus(`Transcribing: ${videoClip.label}...`);
+      const result = await api.whisperTranscribe({
+        videoPath: videoClip.path,
+        language: whisperLang === "auto" ? undefined : whisperLang,
+      });
+      const clipOffset = videoClip.startSec - videoClip.trimStart;
+      for (const seg of (result.segments ?? [])) {
+        allSegments.push({
+          ...seg,
+          start: seg.start + clipOffset,
+          end: seg.end + clipOffset,
+          words: seg.words?.map((w: any) => ({ ...w, start: w.start + clipOffset, end: w.end + clipOffset })),
+        });
+      }
+    }
+    const segments = allSegments;
     if (!segments.length) {
       setWhisperStatus("No speech detected.");
       return;
@@ -682,7 +693,7 @@ const syncAudioToTime = useCallback((t: number) => {
             y: 82,
             width: 80,
             height: 15,
-            textStyle: "plain",
+            textStyle: "outline",
             subtitle: true,
             source: "whisper",
           });
@@ -731,7 +742,7 @@ const syncAudioToTime = useCallback((t: number) => {
           y: 82,
           width: 80,
           height: 15,
-          textStyle: "plain",
+          textStyle: "outline",
           subtitle: true,
           source: "whisper",
         });
@@ -749,6 +760,8 @@ const syncAudioToTime = useCallback((t: number) => {
       ...newTextClips,
     ]);
     setWhisperStatus(`✓ Created ${newTextClips.length} subtitle clips.`);
+    setAudioOverlay(null);
+    setActivePanel("text");
   } catch (err: any) {
     setWhisperStatus(`Error: ${err.message || String(err)}`);
   } finally {
@@ -786,7 +799,11 @@ const handleQwenTts = async () => {
     // 2) Auto-attach as an audio clip on track 1 at timeline start
     setClips(prev => {
       const baseDur = durationSec && durationSec > 0 ? durationSec : 10;
-      const startSec = 0; // attach at beginning of timeline
+      // Place after existing audio clips on track 1, or at playhead
+      const track1Clips = prev.filter(c => c.track === 1);
+      const startSec = track1Clips.length > 0
+        ? Math.max(...track1Clips.map(c => c.startSec + c.durationSec - c.trimStart - c.trimEnd))
+        : currentTimeRef.current;
       const audioClip: TimelineClip = {
         id: uid(),
         path: outputPath,
@@ -802,7 +819,39 @@ const handleQwenTts = async () => {
     });
 
     setTtsStatus("✓ Voice generated and added to Audio 1 track.");
-    setActivePanel("audio");
+    setAudioOverlay(null);
+    // Auto-sync subtitles from TTS audio
+    const clipPlacedAt = (() => {
+      const t1Clips = clips.filter(c => c.track === 1);
+      return t1Clips.length > 0
+        ? Math.max(...t1Clips.map(c => c.startSec + c.durationSec - c.trimStart - c.trimEnd))
+        : currentTimeRef.current;
+    })();
+    try {
+      const syncResult = await (window as any).api.whisperTranscribe?.({ videoPath: outputPath });
+      if (syncResult?.segments?.length) {
+        const subClips: TextClip[] = [];
+        let lastE = 0;
+        for (const seg of syncResult.segments) {
+          const words = (seg.words || []).filter((w: any) => w.word?.trim() && typeof w.start === "number");
+          const chunks = words.length ? words.reduce((acc: any[][], w: any, i: number) => { if (i % 8 === 0) acc.push([]); acc[acc.length-1].push(w); return acc; }, []) : [[{start:seg.start,end:seg.end,word:seg.text||""}]];
+          for (const chunk of chunks) {
+            let cs = (chunk[0].start ?? seg.start) + clipPlacedAt;
+            let ce = (chunk[chunk.length-1].end ?? seg.end) + clipPlacedAt;
+            if (cs < lastE) cs = lastE;
+            if (ce <= cs + 0.05) continue;
+            const label = chunk.map((w: any) => w.word || "").join(" ").trim();
+            if (!label) continue;
+            subClips.push({ id: uid(), startSec: cs, durationSec: Math.max(0.3, ce-cs), track: 2, label, fontFamily: "Arial", fontSize: 28, color: "#ffffff", bold: false, italic: false, underline: false, x: 50, y: 82, width: 80, height: 15, textStyle: "outline", subtitle: true, source: "whisper" });
+            lastE = ce;
+          }
+        }
+        if (subClips.length) {
+          setTextClips(prev => [...prev.filter(c => !(c.subtitle && c.source === "whisper")), ...subClips]);
+          setTtsStatus(`✓ Voice + ${subClips.length} subtitle clips synced to speech.`);
+        }
+      }
+    } catch { /* subtitle sync optional */ }
   } catch (err: any) {
     setTtsStatus(`Error: ${err.message || String(err)}`);
   } finally {
@@ -811,7 +860,119 @@ const handleQwenTts = async () => {
 };
 
 
- const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
+ const handleAutoEdit = async () => {
+  if (!binClips.length && !clips.length) return;
+  setAutoEditRunning(true);
+  setAutoEditStatus(["🎬 Starting Auto Edit..."]);
+  const log = (msg: string) => setAutoEditStatus(prev => [...prev, msg]);
+  try {
+    // Step 1: Arrange bin clips onto track 0 sequentially
+    const sourceBin = binClips.length ? binClips : [];
+    if (sourceBin.length > 0 && !clips.some(c => c.track === 0)) {
+      log("📋 Arranging clips on timeline...");
+      let cursor = 0;
+      const arranged: TimelineClip[] = [];
+      for (let i = 0; i < sourceBin.length; i++) {
+        const b = sourceBin[i];
+        const dur = typeof b.durationSec === "number" && b.durationSec > 0 ? b.durationSec : 5;
+        const clipColor = CLIP_COLORS[i % CLIP_COLORS.length];
+        arranged.push({
+          id: uid(), path: b.path, label: b.label, durationSec: dur,
+          startSec: cursor, trimStart: 0, trimEnd: 0, track: 0, color: clipColor,
+        });
+        if (b.hasAudio) {
+          arranged.push({
+            id: uid(), path: b.path, label: `${b.label} (audio)`, durationSec: dur,
+            startSec: cursor, trimStart: 0, trimEnd: 0, track: 1, color: clipColor,
+          });
+        }
+        cursor += dur;
+      }
+      setClips(arranged);
+      await new Promise(r => setTimeout(r, 100));
+      log(`✓ Placed ${sourceBin.length} clips (${cursor.toFixed(1)}s total)`);
+    } else {
+      log("✓ Using existing timeline clips");
+    }
+
+    // Step 2: Add dissolve transitions between clips
+    log("🔀 Adding transitions...");
+    const videoClips = (clips.length > 0 ? clips : []).filter(c => c.track === 0).sort((a, b) => a.startSec - b.startSec);
+    const currentVideoClips = videoClips;
+    if (currentVideoClips.length > 1) {
+      const newTransitions: TransitionClip[] = currentVideoClips.slice(0, -1).map(c => ({
+        id: uid(), afterClipId: c.id, type: "dissolve" as TransitionType, durationSec: 0.5,
+      }));
+      setTransitions(newTransitions);
+      log(`✓ Added ${newTransitions.length} dissolve transitions`);
+    }
+
+    // Step 3: Apply cinematic color grade to all video clips
+    log("🎨 Applying cinematic color grade...");
+    setClips(prev => prev.map(c => c.track === 0
+      ? { ...c, effects: { brightness: -5, contrast: 15, saturation: -20, vignette: 30, filmGrain: 10 } }
+      : c
+    ));
+    log("✓ Cinematic grade applied (contrast +15, saturation -20, vignette)");
+
+    // Step 4: Generate subtitles via Whisper
+    const allVideoClips = clips.filter(c => c.track === 0).sort((a, b) => a.startSec - b.startSec);
+    const clipCount = allVideoClips.length || currentVideoClips.length;
+    if (clipCount > 0) {
+      log(`🎙 Transcribing ${clipCount} video clip(s) with Whisper...`);
+      try {
+        const api = (window as any).api;
+        const toTranscribe = allVideoClips.length ? allVideoClips : currentVideoClips;
+        const allSegs: { start: number; end: number; text: string; words?: any[] }[] = [];
+        for (const vc of toTranscribe) {
+          const res = await api.whisperTranscribe({ videoPath: vc.path });
+          const offset = vc.startSec - vc.trimStart;
+          for (const seg of res.segments ?? []) {
+            allSegs.push({ ...seg, start: seg.start + offset, end: seg.end + offset, words: seg.words?.map((w: any) => ({ ...w, start: w.start + offset, end: w.end + offset })) });
+          }
+        }
+        if (allSegs.length) {
+          const subClips: TextClip[] = [];
+          let lastE = 0;
+          for (const seg of allSegs) {
+            const words = (seg.words || []).filter((w: any) => w.word?.trim() && typeof w.start === "number");
+            const chunks: any[][] = words.length
+              ? words.reduce((acc: any[][], w: any, i: number) => { if (i % 8 === 0) acc.push([]); acc[acc.length-1].push(w); return acc; }, [])
+              : [[{start:seg.start, end:seg.end, word:seg.text||""}]];
+            for (const chunk of chunks) {
+              let cs = chunk[0].start ?? seg.start;
+              let ce = chunk[chunk.length-1].end ?? seg.end;
+              if (cs < lastE) cs = lastE;
+              if (ce <= cs + 0.05) continue;
+              const label = chunk.map((w: any) => w.word||"").join(" ").trim();
+              if (!label) continue;
+              subClips.push({ id: uid(), startSec: cs, durationSec: Math.max(0.3, ce-cs), track: 2, label, fontFamily: "Arial", fontSize: 28, color: "#ffffff", bold: false, italic: false, underline: false, x: 50, y: 82, width: 80, height: 15, textStyle: "outline", subtitle: true, source: "whisper" });
+              lastE = ce;
+            }
+          }
+          if (subClips.length) {
+            setTextClips(prev => [...prev.filter(c => !(c.subtitle && c.source === "whisper")), ...subClips]);
+            log(`✓ Generated ${subClips.length} subtitle clips synced to speech`);
+          } else {
+            log("⚠ No speech detected — no subtitles added");
+          }
+        } else {
+          log("⚠ Whisper returned no segments");
+        }
+      } catch (e: any) {
+        log(`⚠ Subtitle generation skipped: ${e.message || "Whisper unavailable"}`);
+      }
+    }
+
+    log("✅ Auto Edit complete!");
+  } catch (err: any) {
+    log(`❌ Error: ${err.message || String(err)}`);
+  } finally {
+    setAutoEditRunning(false);
+  }
+};
+
+const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
   if(tool!=="select")return;e.preventDefault();e.stopPropagation();setSelectedTextId(id);setBulkTextSelection(null);setSelectedId(null);setSelectedListId(null);
   const clip=textClips.find(c=>c.id===id)!;const startX=e.clientX;const origStart=clip.startSec;const el=document.getElementById(`tclip-${id}`);let finalSec=origStart;
   const onMove=(ev:MouseEvent)=>{finalSec=Math.max(0,origStart+(ev.clientX-startX)/zoom);if(el)el.style.left=`${finalSec*zoom}px`;};
@@ -1293,6 +1454,23 @@ const handleQwenTts = async () => {
       <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 4 }}>
         AI Audio tools
       </div>
+      {/* Auto Edit card */}
+      <button
+        onClick={() => { setAutoEditOpen(true); setAutoEditStatus([]); }}
+        style={{ width: "100%", background: "linear-gradient(135deg,#1a1f3a,#0f1830)", border: "1px solid #6366f155", borderRadius: 10, padding: "14px 16px", cursor: "pointer", textAlign: "left", color: "#e5e7eb", display: "flex", flexDirection: "column", gap: 6, marginBottom: 4 }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+          <span style={{ fontSize: 20 }}>🤖</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#818cf8", letterSpacing: "0.06em" }}>AUTO EDIT</span>
+          <span style={{ background: "#312e81", color: "#a5b4fc", fontSize: 9, padding: "2px 6px", borderRadius: 4 }}>AI</span>
+        </div>
+        <div style={{ fontSize: 12, color: "#9ca3af" }}>One click: arrange clips → transitions → cinematic grade → auto subtitles. No input needed.</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+          {["📋 Arrange","🔀 Transitions","🎨 Color grade","🎙 Subtitles"].map(tag => (
+            <span key={tag} style={{ background: "#1e2040", color: "#818cf8", fontSize: 10, padding: "2px 8px", borderRadius: 10 }}>{tag}</span>
+          ))}
+        </div>
+      </button>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
         {/* Auto Subtitles button */}
         <button
@@ -1404,6 +1582,57 @@ const handleQwenTts = async () => {
       </div>
     </div>
 
+    {/* Auto Edit modal */}
+    {autoEditOpen && (
+      <div style={{ position: "absolute", inset: 0, background: "rgba(3,7,18,0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }}>
+        <div style={{ width: 520, maxHeight: "90%", background: "#0b0c10", borderRadius: 14, border: "1px solid #6366f144", boxShadow: "0 24px 80px rgba(0,0,0,0.85)", padding: 22, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#e5e7eb", marginBottom: 2 }}>🤖 Auto Edit</div>
+              <div style={{ fontSize: 11, color: "#6b7280" }}>AI arranges, grades, and subtitles your video automatically.</div>
+            </div>
+            {!autoEditRunning && <button onClick={() => setAutoEditOpen(false)} style={{ background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer", fontSize: 18 }}>×</button>}
+          </div>
+          <div style={{ background: "#111214", border: "1px solid #1f2937", borderRadius: 8, padding: 14 }}>
+            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>What Auto Edit will do:</div>
+            {[
+              { icon: "📋", label: "Arrange clips", desc: `Place all ${binClips.length} bin clip(s) on Video 1 track in sequence` },
+              { icon: "🔀", label: "Add transitions", desc: "Dissolve transition between every clip pair" },
+              { icon: "🎨", label: "Cinematic grade", desc: "Contrast +15, saturation -20, vignette for all clips" },
+              { icon: "🎙", label: "Auto subtitles", desc: "Whisper transcribes speech → synced text clips" },
+            ].map(step => (
+              <div key={step.icon} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 10 }}>
+                <span style={{ fontSize: 16, flexShrink: 0 }}>{step.icon}</span>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "#e2e8f0" }}>{step.label}</div>
+                  <div style={{ fontSize: 11, color: "#6b7280" }}>{step.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {autoEditStatus.length > 0 && (
+            <div style={{ background: "#0a0b0e", border: "1px solid #1f2937", borderRadius: 8, padding: "10px 14px", maxHeight: 160, overflowY: "auto", display: "flex", flexDirection: "column", gap: 3 }}>
+              {autoEditStatus.map((line, i) => (
+                <div key={i} style={{ fontSize: 11, color: line.startsWith("✅") ? "#22c55e" : line.startsWith("❌") ? "#ef4444" : line.startsWith("⚠") ? "#f59e0b" : "#9ca3af", fontFamily: "monospace" }}>{line}</div>
+              ))}
+              {autoEditRunning && <div style={{ fontSize: 11, color: "#6366f1", fontFamily: "monospace", display: "flex", gap: 4 }}><span>⏳</span><span>Working...</span></div>}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={handleAutoEdit}
+              disabled={autoEditRunning || (binClips.length === 0 && !clips.some(c => c.track === 0))}
+              style={{ flex: 1, background: autoEditRunning ? "#1f2937" : "linear-gradient(135deg,#4338ca,#6366f1)", border: "none", color: "#fff", borderRadius: 8, padding: "10px", fontSize: 13, fontWeight: 700, cursor: autoEditRunning ? "default" : "pointer", opacity: (binClips.length === 0 && !clips.some(c => c.track === 0)) ? 0.5 : 1 }}
+            >
+              {autoEditRunning ? "⏳ Auto Editing..." : "🚀 Start Auto Edit"}
+            </button>
+            {!autoEditRunning && autoEditStatus.some(s => s.startsWith("✅")) && (
+              <button onClick={() => setAutoEditOpen(false)} style={{ background: "#14532d", border: "1px solid #22c55e", color: "#22c55e", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Done ✓</button>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
     {/* Overlay panel over audio area */}
     {audioOverlay && (
       <div
