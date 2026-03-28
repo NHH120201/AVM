@@ -443,7 +443,7 @@ export const App: React.FC = () => {
               gap: 6,
             }}
           >
-            âœ‚ Open Timeline Editor
+            Open Timeline Editor
           </button>
         </div>
       </header>
@@ -1591,7 +1591,7 @@ export const App: React.FC = () => {
               gap: 6,
             }}
           >
-            âœ‚ Open Timeline Editor
+            Open Timeline Editor
           </button>
         </div>
       </header>

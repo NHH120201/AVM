@@ -3,6 +3,8 @@ import ccIcon from "./icon/CC.png";
 import textIcon from "./icon/T.png";
 import videoIcon from "./icon/Video.png";
 import audioIcon from "./icon/Audio.png";
+import { Upload, Music, Type, ArrowLeftRight, Sparkles, Shapes, Scissors, Hand, ZoomIn, Undo2, Redo2, Trash2, SplitSquareHorizontal, Magnet, Film, AlignLeft, AlignCenter, AlignRight } from "lucide-react";
+import { toast } from "sonner";
 
 export type TransitionType = "dissolve"|"fade_black"|"fade_white"|"wipe_left"|"wipe_right"|"push_left"|"push_right"|"zoom_in"|"zoom_out"|"spin"|"flash"|"glitch";
 export interface TransitionClip {
@@ -48,7 +50,7 @@ export interface TextClip {
  id: string; startSec: number; durationSec: number; track: 2; label: string;
  fontFamily: string; fontSize: number; color: string; bold: boolean; italic: boolean;
  underline: boolean; x: number; y: number; width: number; height: number; textStyle?: string;
- subtitle?: boolean; source?: "whisper";
+ subtitle?: boolean; source?: "whisper"; textAlign?: "left"|"center"|"right";
 }
 export interface ListClip {
  id: string; startSec: number; durationSec: number;
@@ -103,10 +105,13 @@ const DEFAULT_FONT_OPTIONS = [
   "Bebas Neue",
 ];
 type SidePanel = "media"|"text"|"audio"|"transitions"|"effects"|"elements";
-const NAV_ITEMS: { id: SidePanel; icon: string; label: string }[] = [
- { id:"media", icon:"⬆", label:"Import" }, { id:"audio", icon:"♪", label:"Audio" },
- { id:"text", icon:"T", label:"Text" }, { id:"transitions", icon:"⟷", label:"Transitions" },
- { id:"effects", icon:"✦", label:"Effects" }, { id:"elements", icon:"⊞", label:"Elements" },
+const NAV_ITEMS: { id: SidePanel; label: string; Icon: React.FC<{size?:number|string;strokeWidth?:number|string}> }[] = [
+  { id:"media", label:"Import", Icon: Upload },
+  { id:"audio", label:"Audio", Icon: Music },
+  { id:"text", label:"Text", Icon: Type },
+  { id:"transitions", label:"Transitions", Icon: ArrowLeftRight },
+  { id:"effects", label:"Effects", Icon: Sparkles },
+  { id:"elements", label:"Elements", Icon: Shapes },
 ];
 
 export const VideoEditor: React.FC<VideoEditorProps> = ({ clips: initialClips=[], savedTimeline, savedTextClips, onExport, onClose }) => {
@@ -117,6 +122,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ clips: initialClips=[]
  const [binClips, setBinClips] = useState<{ path: string; label: string; color: string; hasAudio?: boolean; durationSec?: number|null }[]>(
   () => initialClips.map((c,i) => ({ ...c, color: CLIP_COLORS[i%CLIP_COLORS.length] }))
  );
+ const [binThumbnails, setBinThumbnails] = useState<Record<string,string>>({});
  const [tool, setTool] = useState<"select"|"razor"|"hand"|"zoom">("select");
  const [playing, setPlaying] = useState(false);
  const [currentTime, setCurrentTime] = useState(0);
@@ -142,6 +148,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ clips: initialClips=[]
  const [selectedElementId, setSelectedElementId] = useState<string|null>(null);
  const [mediaSearch, setMediaSearch] = useState("");
  const [exportTitle, setExportTitle] = useState("My project");
+ const [selectedEffectPreset, setSelectedEffectPreset] = useState<string|null>(null);
  const [autoEditRunning, setAutoEditRunning] = useState(false);
  const [autoEditStatus, setAutoEditStatus] = useState<string[]>([]);
  const [autoEditOpen, setAutoEditOpen] = useState(false);
@@ -182,6 +189,35 @@ const [audioOverlay, setAudioOverlay] = useState<null | "subtitles" | "tts">(nul
  const isDraggingClip = useRef(false);
  const trimRef = useRef<{ id:string; edge:"start"|"end"; startX:number; origTS:number; origTE:number; origDur:number; origStart:number }|null>(null);
  const binDragData = useRef<{ path:string; label:string; color:string; hasAudio?: boolean; durationSec?: number|null }|null>(null);
+
+ useEffect(() => {
+  const newPaths = binClips.map(c => c.path).filter(p => !binThumbnails[p]);
+  if (!newPaths.length) return;
+  newPaths.forEach(filePath => {
+    const url = `file:///${filePath.replace(/\\/g,"/")}`;
+    const vid = document.createElement("video");
+    vid.src = url;
+    vid.preload = "metadata";
+    vid.muted = true;
+    vid.currentTime = 0.5;
+    const canvas = document.createElement("canvas");
+    const onSeeked = () => {
+      canvas.width = 140;
+      canvas.height = 90;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(vid, 0, 0, 140, 90);
+        try {
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+          setBinThumbnails(prev => ({ ...prev, [filePath]: dataUrl }));
+        } catch {}
+      }
+      vid.src = "";
+    };
+    vid.addEventListener("seeked", onSeeked, { once: true });
+    vid.addEventListener("error", () => { vid.src = ""; }, { once: true });
+  });
+ }, [binClips]);
 
  useEffect(() => {
   const styleId = "avm-local-fonts";
@@ -395,9 +431,14 @@ const syncAudioToTime = useCallback((t: number) => {
     else if(selectedElementId){setElements(prev=>prev.filter(e=>e.id!==selectedElementId));setSelectedElementId(null);}
     else if(selectedTransitionId){setTransitions(prev=>prev.filter(t=>t.id!==selectedTransitionId));setSelectedTransitionId(null);}
     }
+   if(e.key==="Escape"){
+     if(audioOverlay){setAudioOverlay(null);return;}
+     if(autoEditOpen){setAutoEditOpen(false);return;}
+     if(contextMenu){setContextMenu(null);return;}
+   }
   };
   window.addEventListener("keydown",onKey);return()=>window.removeEventListener("keydown",onKey);
- },[selectedId,selectedTextId,selectedListId,selectedElementId,selectedTransitionId,undo,pushHistory]);
+ },[selectedId,selectedTextId,selectedListId,selectedElementId,selectedTransitionId,audioOverlay,autoEditOpen,contextMenu,undo,pushHistory]);
 
  const onClipMouseDown=(e:React.MouseEvent,id:string)=>{
   if(tool!=="select")return;e.preventDefault();e.stopPropagation();setSelectedId(id);
@@ -791,6 +832,7 @@ const syncAudioToTime = useCallback((t: number) => {
       ...newTextClips,
     ]);
     setWhisperStatus(`✓ Created ${newTextClips.length} subtitle clips.`);
+    toast.success(`${newTextClips.length} subtitle clips created`, { description: "Synced to speech audio", duration: 4000 });
     setAudioOverlay(null);
     setActivePanel("text");
   } catch (err: any) {
@@ -851,6 +893,7 @@ const handleQwenTts = async () => {
     });
 
     setTtsStatus("✓ Voice generated and added to Audio 1 track.");
+    toast.success("Voice generated", { description: "Added to Audio 1 track", duration: 4000 });
     setAudioOverlay(null);
     try {
       const syncResult = await (window as any).api.whisperTranscribe?.({ videoPath: outputPath });
@@ -1028,7 +1071,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
      {NAV_ITEMS.map(item=>(
       <button key={item.id} onClick={()=>setActivePanel(item.id)} title={item.label} style={{width:48,minHeight:50,borderRadius:7,border:"none",cursor:"pointer",background:activePanel===item.id?"#23252c":"transparent",color:activePanel===item.id?"#e2e8f0":"#6b7280",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,transition:"all 0.1s"}}
        onMouseEnter={e=>{if(activePanel!==item.id)(e.currentTarget.style.background="#1e2027");}} onMouseLeave={e=>{if(activePanel!==item.id)(e.currentTarget.style.background="transparent");}}>
-       <span style={{fontSize:item.id==="text"?18:16,fontWeight:item.id==="text"?700:400,lineHeight:1}}>{item.icon}</span>
+       <item.Icon size={16} strokeWidth={1.5} />
        <span style={{fontSize:9,fontWeight:500,letterSpacing:"0.02em"}}>{item.label}</span>
       </button>
      ))}
@@ -1099,7 +1142,17 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
          <div style={{width:"100%",height:"100%",overflowY:"auto",padding:16,display:"flex",flexWrap:"wrap",gap:12,alignContent:"flex-start"}}>
           {binClips.map(clip=>(
            <div key={clip.path} draggable onDragStart={e=>onBinDragStart(e,clip)} style={{width:140,display:"flex",flexDirection:"column",gap:6,cursor:"grab"}} onMouseEnter={e=>(e.currentTarget as HTMLDivElement).style.opacity="0.8"} onMouseLeave={e=>(e.currentTarget as HTMLDivElement).style.opacity="1"}>
-            <div style={{width:140,height:90,background:clip.color+"22",border:`1px solid ${clip.color}44`,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28}}>🎬</div>
+            <div style={{width:140,height:90,background:clip.color+"22",border:`1px solid ${clip.color}44`,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,overflow:"hidden",position:"relative"}}>
+              {binThumbnails[clip.path]
+                ? <img src={binThumbnails[clip.path]} style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:8}} alt=""/>
+                : <Film size={28} strokeWidth={1} style={{opacity:0.4,color:clip.color}}/>
+              }
+              {typeof clip.durationSec === "number" && clip.durationSec > 0 && (
+                <span style={{position:"absolute",bottom:4,right:6,background:"rgba(0,0,0,0.75)",color:"#e2e8f0",fontSize:9,padding:"1px 5px",borderRadius:3,fontFamily:"monospace"}}>
+                  {Math.floor(clip.durationSec/60).toString().padStart(2,"0")}:{Math.floor(clip.durationSec%60).toString().padStart(2,"0")}
+                </span>
+              )}
+            </div>
             <span style={{fontSize:11,color:"#9ca3af",textAlign:"center",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{clip.label}</span>
            </div>
           ))}
@@ -1198,6 +1251,19 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
             <span style={{fontSize:10,color:"#a78bfa",minWidth:22}}>{tc.fontSize}</span>
            </div>
           </div>
+          <div style={{display:"flex",gap:4,marginBottom:8}}>
+            {([
+              {align:"left", Icon:AlignLeft},
+              {align:"center", Icon:AlignCenter},
+              {align:"right", Icon:AlignRight},
+            ] as const).map(({align, Icon})=>(
+              <button key={align}
+               onClick={()=>updateText(tc.id,{textAlign:align as any})}
+               style={{flex:1,height:30,borderRadius:5,border:`1px solid ${(tc as any).textAlign===align?"#3b82f6":"#374151"}`,background:(tc as any).textAlign===align?"#1e3a5f":"transparent",color:(tc as any).textAlign===align?"#93c5fd":"#6b7280",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
+                <Icon size={13} strokeWidth={1.5}/>
+              </button>
+            ))}
+          </div>
           <div style={{display:"flex",gap:6,alignItems:"center"}}>
            {([{key:"bold",l:"B",s:{fontWeight:700}},{key:"italic",l:"I",s:{fontStyle:"italic" as const}},{key:"underline",l:"U",s:{textDecoration:"underline" as const}}] as {key:keyof TextClip;l:string;s:React.CSSProperties}[]).map(({key,l,s})=>(
             <button key={key} onClick={()=>updateText(tc.id,{[key]:!tc[key]} as Partial<TextClip>)} style={{...s,width:34,height:34,borderRadius:6,fontSize:13,background:tc[key]?"#4c1d95":"#111214",border:`1px solid ${tc[key]?"#7c3aed":"#374151"}`,color:"#e2e8f0",cursor:"pointer"}}>{l}</button>
@@ -1213,7 +1279,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
             </div>
            ))}
           </div>
-          <button onClick={()=>{setTextClips(prev=>prev.filter(c=>c.id!==tc.id));setSelectedTextId(null);}} style={{background:"#1a0808",border:"1px solid #450a0a",color:"#ef4444",borderRadius:6,padding:7,fontSize:11,cursor:"pointer"}}>🗑 Delete</button>
+          <button onClick={()=>{setTextClips(prev=>prev.filter(c=>c.id!==tc.id));setSelectedTextId(null);}} style={{background:"#1a0808",border:"1px solid #450a0a",color:"#ef4444",borderRadius:6,padding:7,fontSize:11,cursor:"pointer"}}><><Trash2 size={11} strokeWidth={1.5} style={{display:"inline",verticalAlign:"middle",marginRight:4}}/> Delete</></button>
          </div>
         );})()}
 
@@ -1262,7 +1328,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
            ))}
           </div>
           <button onClick={()=>{const lastReveal=lc.items.length?lc.items[lc.items.length-1].revealSec+2:lc.startSec;updateList(lc.id,{items:[...lc.items,{id:uid(),text:"New item",revealSec:lastReveal}]});}} style={{background:"#0d2e0d",border:"1px solid #22c55e",color:"#86efac",borderRadius:6,padding:"6px",fontSize:11,cursor:"pointer"}}>+ Add item</button>
-          <button onClick={()=>{setListClips(prev=>prev.filter(c=>c.id!==lc.id));setSelectedListId(null);}} style={{background:"#1a0808",border:"1px solid #450a0a",color:"#ef4444",borderRadius:6,padding:7,fontSize:11,cursor:"pointer"}}>🗑 Delete list</button>
+          <button onClick={()=>{setListClips(prev=>prev.filter(c=>c.id!==lc.id));setSelectedListId(null);}} style={{background:"#1a0808",border:"1px solid #450a0a",color:"#ef4444",borderRadius:6,padding:7,fontSize:11,cursor:"pointer"}}><><Trash2 size={11} strokeWidth={1.5} style={{display:"inline",verticalAlign:"middle",marginRight:4}}/> Delete list</></button>
          </div>
         );})()}
        </div>
@@ -1349,10 +1415,10 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
          <div style={{fontSize:11,fontWeight:600,color:"#6b7280",letterSpacing:"0.08em",marginBottom:10}}>PRESETS</div>
          <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:18}}>
           {LUT_PRESETS.map(p=>(
-           <button key={p.id} onClick={()=>{if(selClip)setClips(prev=>prev.map(c=>c.id===selClip.id?{...c,effects:{...c.effects,...p.vals}}:c));}}
-            style={{background:"#1a1b1f",border:`1px solid ${fx.lut===p.id?"#6366f1":"#26282e"}`,borderRadius:8,padding:"8px 12px",cursor:selClip?"pointer":"default",color:selClip?"#e2e8f0":"#4b5563",fontSize:11,display:"flex",flexDirection:"column",alignItems:"center",gap:4,minWidth:64,opacity:selClip?1:0.5}}
+           <button key={p.id} onClick={()=>{if(selClip){setClips(prev=>prev.map(c=>c.id===selClip.id?{...c,effects:{...c.effects,...p.vals}}:c));setSelectedEffectPreset(p.id);}}}
+            style={{background:"#1a1b1f",border:`1px solid ${selectedEffectPreset===p.id?"#6366f1":"#26282e"}`,borderRadius:8,padding:"8px 12px",cursor:selClip?"pointer":"default",color:selClip?"#e2e8f0":"#4b5563",fontSize:11,display:"flex",flexDirection:"column",alignItems:"center",gap:4,minWidth:64,opacity:selClip?1:0.5}}
             onMouseEnter={e=>{if(selClip)(e.currentTarget as HTMLButtonElement).style.borderColor="#6366f1";}}
-            onMouseLeave={e=>{if(selClip)(e.currentTarget as HTMLButtonElement).style.borderColor=fx.lut===p.id?"#6366f1":"#26282e";}}>
+            onMouseLeave={e=>{if(selClip)(e.currentTarget as HTMLButtonElement).style.borderColor=selectedEffectPreset===p.id?"#6366f1":"#26282e";}}>
             <span style={{fontSize:18}}>{p.icon}</span>
             <span>{p.label}</span>
            </button>
@@ -1381,7 +1447,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
          {selClip&&Object.values(fx).some(v=>v!==undefined&&v!==0&&v!=="")&&(
           <button onClick={()=>setClips(prev=>prev.map(c=>c.id===selClip.id?{...c,effects:{}}:c))}
            style={{background:"#1a0808",border:"1px solid #450a0a",color:"#ef4444",borderRadius:6,padding:"6px 14px",fontSize:12,cursor:"pointer",marginTop:4}}>
-           Reset all effects
+           <><Trash2 size={11} strokeWidth={1.5} style={{display:"inline",verticalAlign:"middle",marginRight:4}}/> Reset all effects</>
           </button>
          )}
         </div>
@@ -1453,8 +1519,23 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
             <input type="range" min={0} max={100} value={el.opacity} onChange={e=>setElements(prev=>prev.map(el2=>el2.id===el.id?{...el2,opacity:+e.target.value}:el2))} style={{width:"100%",accentColor:"#6366f1"}}/>
            </div>
           </div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}}>
+           {[{key:"x",label:"X%"},{key:"y",label:"Y%"},{key:"width",label:"W%"},{key:"height",label:"H%"}].map(f=>(
+            <div key={f.key} style={{display:"flex",flexDirection:"column",gap:2,flex:1,minWidth:50}}>
+              <span style={{fontSize:9,color:"#6b7280"}}>{f.label}</span>
+              <input type="number" min={0} max={100} value={(el as any)[f.key]} onChange={e=>setElements(prev=>prev.map(el2=>el2.id===el.id?{...el2,[f.key]:+e.target.value}:el2))}
+               style={{background:"#111214",border:"1px solid #374151",borderRadius:4,color:"#e2e8f0",padding:"3px 5px",fontSize:11,width:"100%"}}/>
+            </div>
+           ))}
+          </div>
+          <div style={{marginTop:6,display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:10,color:"#6b7280"}}>Duration:</span>
+            <input type="number" min={0.1} max={60} step={0.1} value={el.durationSec} onChange={e=>setElements(prev=>prev.map(el2=>el2.id===el.id?{...el2,durationSec:+e.target.value}:el2))}
+             style={{background:"#111214",border:"1px solid #374151",borderRadius:4,color:"#e2e8f0",padding:"3px 8px",fontSize:11,width:60}}/>
+            <span style={{fontSize:10,color:"#6b7280"}}>s</span>
+          </div>
           <button onClick={()=>{setElements(prev=>prev.filter(e=>e.id!==selectedElementId));setSelectedElementId(null);}}
-           style={{background:"#1a0808",border:"1px solid #450a0a",color:"#ef4444",borderRadius:5,padding:"4px 10px",fontSize:11,cursor:"pointer",marginTop:6}}>🗑 Delete</button>
+           style={{background:"#1a0808",border:"1px solid #450a0a",color:"#ef4444",borderRadius:5,padding:"4px 10px",fontSize:11,cursor:"pointer",marginTop:6}}><><Trash2 size={11} strokeWidth={1.5} style={{display:"inline",verticalAlign:"middle",marginRight:4}}/> Delete</></button>
          </div>
         );
        })()}
@@ -2054,6 +2135,22 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
           onChange={e=>setClips(prev=>prev.map(c=>c.id===selectedId?{...c,clipVolume:+e.target.value}:c))}
           style={{flex:1,accentColor:"#22c55e",minWidth:60}}/>
         </div>
+        <div style={{flex:1,minWidth:120}}>
+          <div style={{display:"flex",gap:12}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Fade In: {selected?.fadeIn ?? 0}s</div>
+              <input type="range" min={0} max={3} step={0.1} value={selected?.fadeIn ?? 0}
+               onChange={e=>setClips(prev=>prev.map(c=>c.id===selectedId?{...c,fadeIn:+e.target.value}:c))}
+               style={{width:"100%",accentColor:"#22c55e"}}/>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Fade Out: {selected?.fadeOut ?? 0}s</div>
+              <input type="range" min={0} max={3} step={0.1} value={selected?.fadeOut ?? 0}
+               onChange={e=>setClips(prev=>prev.map(c=>c.id===selectedId?{...c,fadeOut:+e.target.value}:c))}
+               style={{width:"100%",accentColor:"#22c55e"}}/>
+            </div>
+          </div>
+        </div>
        </div>
       </div>
      )}
@@ -2160,7 +2257,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
 
      {/* Transport bar */}
      <div style={{background:"#0a0b0e",borderTop:"1px solid #1e2230",display:"flex",flexDirection:"column",flexShrink:0}}>
-      <div style={{height:3,background:"#26282e",cursor:"pointer",position:"relative"}}
+      <div style={{height:6,background:"#26282e",cursor:"pointer",position:"relative"}}
        onClick={e=>{const r=(e.currentTarget as HTMLDivElement).getBoundingClientRect();applyScrub(Math.max(0,Math.min(totalDuration,((e.clientX-r.left)/r.width)*totalDuration)));}}
        onMouseDown={e=>{const bar=e.currentTarget as HTMLDivElement;const om=(ev:MouseEvent)=>{const r=bar.getBoundingClientRect();applyScrub(Math.max(0,Math.min(totalDuration,((ev.clientX-r.left)/r.width)*totalDuration)));};const ou=()=>{window.removeEventListener("mousemove",om);window.removeEventListener("mouseup",ou);};window.addEventListener("mousemove",om);window.addEventListener("mouseup",ou);}}>
        <div style={{height:"100%",width:`${Math.min(100,(currentTime/Math.max(totalDuration,0.01))*100)}%`,background:"#3b82f6",borderRadius:2}}/>
@@ -2193,15 +2290,20 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
    <div style={{height:40,background:"#16181f",borderTop:"1px solid #1a1b1f",borderBottom:"1px solid #26282e",display:"flex",alignItems:"center",padding:"0 14px",gap:6,flexShrink:0}}>
     <div style={{display:"flex",gap:2,background:"#111214",borderRadius:7,padding:3}}>
      {(["select","razor","hand","zoom"] as const).map(t=>(
-      <button key={t} title={t} onClick={()=>setTool(t)} style={{width:30,height:30,borderRadius:5,border:"none",cursor:"pointer",background:tool===t?"#3b82f6":"transparent",color:tool===t?"#fff":"#6b7280",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.1s"}}>{{select:"↖",razor:"✂",hand:"✋",zoom:"🔍"}[t]}</button>
+      <button key={t} title={t} onClick={()=>setTool(t)} style={{width:30,height:30,borderRadius:5,border:"none",cursor:"pointer",background:tool===t?"#3b82f6":"transparent",color:tool===t?"#fff":"#6b7280",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.1s"}}>{t==="select"?<svg width="12" height="12" viewBox="0 0 13 13" fill="currentColor"><path d="M2 1l9 5-5 1-3 6L2 1z"/></svg>:t==="razor"?<Scissors size={13} strokeWidth={1.5}/>:t==="hand"?<Hand size={13} strokeWidth={1.5}/>:<ZoomIn size={13} strokeWidth={1.5}/>}</button>
      ))}
     </div>
     <div style={{width:1,height:20,background:"#26282e",margin:"0 3px"}}/>
-    {[{icon:"↩",title:"Undo (Ctrl+Z)",fn:undo},{icon:"↪",title:"Redo",fn:()=>{}},{icon:"🗑",title:"Delete",fn:deleteSelected},{icon:"⚡",title:"Split at playhead",fn:()=>{if(selectedId)razorCut(selectedId,currentTime);}}].map(b=>(
-     <button key={b.icon} title={b.title} onClick={b.fn} style={{width:30,height:30,borderRadius:5,border:"none",cursor:"pointer",background:"transparent",color:"#6b7280",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center"}} onMouseEnter={e=>(e.currentTarget.style.background="#26282e")} onMouseLeave={e=>(e.currentTarget.style.background="transparent")}>{b.icon}</button>
+    {([
+      {Icon:Undo2, title:"Undo (Ctrl+Z)", fn:undo},
+      {Icon:Redo2, title:"Redo", fn:()=>{}},
+      {Icon:Trash2, title:"Delete selected", fn:deleteSelected},
+      {Icon:SplitSquareHorizontal, title:"Split at playhead", fn:()=>{if(selectedId)razorCut(selectedId,currentTime);}},
+    ] as const).map((b,i)=>(
+      <button key={i} title={b.title} onClick={b.fn as ()=>void} style={{width:30,height:30,borderRadius:5,border:"none",cursor:"pointer",background:"transparent",color:"#6b7280",display:"flex",alignItems:"center",justifyContent:"center"}} onMouseEnter={e=>(e.currentTarget.style.background="#26282e")} onMouseLeave={e=>(e.currentTarget.style.background="transparent")}><b.Icon size={13} strokeWidth={1.5}/></button>
     ))}
     <div style={{width:1,height:20,background:"#26282e",margin:"0 3px"}}/>
-    <button onClick={()=>setSnap(s=>!s)} title="Snap" style={{width:30,height:30,borderRadius:5,border:"none",cursor:"pointer",background:snap?"#1e3a5f":"transparent",color:snap?"#3b82f6":"#6b7280",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center"}}>⊞</button>
+    <button onClick={()=>setSnap(s=>!s)} title="Snap" style={{width:30,height:30,borderRadius:5,border:"none",cursor:"pointer",background:snap?"#1e3a5f":"transparent",color:snap?"#3b82f6":"#6b7280",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center"}}><Magnet size={13} strokeWidth={1.5}/></button>
     <span style={{fontSize:10,color:"#4b5563"}}>ZOOM</span>
     <input type="range" min={20} max={200} value={zoom} onChange={e=>setZoom(Number(e.target.value))} style={{width:68,accentColor:"#3b82f6"}}/>
     <span style={{fontSize:10,color:"#6b7280",minWidth:32}}>{zoom}px/s</span>
@@ -3104,14 +3206,19 @@ elements,
 });
 
 if (result?.outputPath) {
-  console.log("[EDITOR EXPORT] Done:", result.outputPath);
+  const folder = result.outputPath.replace(/[/\\][^/\\]+$/, "");
+  toast.success("Export complete!", {
+    description: result.outputPath.split(/[/\\]/).pop(),
+    action: { label: "Open folder", onClick: () => (window as any).api.openOutputFolder?.(folder) },
+    duration: 8000,
+  });
   setExportResult({ ok: true, message: `Saved: ${result.outputPath}` });
 }
 } catch (err: any) {
-console.error("[EDITOR EXPORT ERROR]", err);
-setExportResult({ ok: false, message: `Export failed: ${err?.message || String(err)}` });
+  toast.error("Export failed", { description: err?.message || String(err) });
 } finally {
 setExporting(false);
+setExportOpen(false);
 }
 }}
 >
