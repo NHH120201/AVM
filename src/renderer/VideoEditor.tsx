@@ -239,8 +239,9 @@ const [audioOverlay, setAudioOverlay] = useState<null | "subtitles" | "tts">(nul
   if(!clip){vid.pause();vid.removeAttribute("src");vid.load();return;}
   const url=`file:///${clip.path.replace(/\\/g,"/")}`;
   const offset=Math.max(0,t-clip.startSec+clip.trimStart);
-  if(vid.src!==url){vid.pause();vid.src=url;vid.load();vid.addEventListener("loadedmetadata",()=>{if((vid as any).fastSeek)(vid as any).fastSeek(offset);else vid.currentTime=offset;},{once:true});}
-  else{if((vid as any).fastSeek)(vid as any).fastSeek(offset);else vid.currentTime=offset;}
+  const playbackRate = typeof clip.speed === "number" && clip.speed > 0 ? clip.speed : 1;
+  if(vid.src!==url){vid.pause();vid.src=url;vid.load();vid.addEventListener("loadedmetadata",()=>{vid.playbackRate=playbackRate;if((vid as any).fastSeek)(vid as any).fastSeek(offset);else vid.currentTime=offset;},{once:true});}
+  else{vid.playbackRate=playbackRate;if((vid as any).fastSeek)(vid as any).fastSeek(offset);else vid.currentTime=offset;}
  },[]);
 
  const audioLoadingRef = useRef(false);
@@ -295,6 +296,11 @@ const syncAudioToTime = useCallback((t: number) => {
   syncAudioToTime(t);
 
   if(clip&&vid&&!vid.paused){
+   // Apply per-clip volume (scaled against master volume)
+   const clipVol = typeof clip.clipVolume === "number" ? clip.clipVolume / 100 : 1;
+   const masterVol = volume / 100;
+   const targetVol = Math.max(0, Math.min(1, clipVol * masterVol));
+   if(Math.abs(vid.volume - targetVol) > 0.01) vid.volume = targetVol;
    const tlTime=clip.startSec+(vid.currentTime-clip.trimStart);
    if(Math.abs(tlTime-currentTimeRef.current)>0.001){currentTimeRef.current=tlTime;setCurrentTime(tlTime);}
    const clipEnd=clip.startSec+clip.durationSec-clip.trimStart-clip.trimEnd;
@@ -324,7 +330,7 @@ const syncAudioToTime = useCallback((t: number) => {
    }
   }
   rafRef.current=requestAnimationFrame(tick);
- },[syncVideoToTime,syncAudioToTime]);
+ },[syncVideoToTime,syncAudioToTime,volume]);
 
  useEffect(() => {
   const vid = videoRef.current;
@@ -565,19 +571,32 @@ const syncAudioToTime = useCallback((t: number) => {
  };
 
  const deleteSelected=()=>{
-  if(!selectedId)return;
-  setClips(prev=>{
-    pushHistory(prev);
-    const next = prev.filter(c=>c.id!==selectedId);
-    // If we just deleted an audio clip on track 1, stop the audio element if nothing remains under the playhead.
-    const deleted = prev.find(c=>c.id===selectedId);
-    if (deleted && deleted.track===1 && audioRef.current) {
-      const stillHasAudioHere = next.some(c=>c.track===1 && currentTimeRef.current>=c.startSec && currentTimeRef.current<c.startSec+c.durationSec-c.trimStart-c.trimEnd);
-      if (!stillHasAudioHere) audioRef.current.pause();
-    }
-    return next;
-  });
-  setSelectedId(null);
+  // Handle all selection types, not just video clips.
+  if(selectedId){
+    setClips(prev=>{
+      pushHistory(prev);
+      const next = prev.filter(c=>c.id!==selectedId);
+      const deleted = prev.find(c=>c.id===selectedId);
+      if (deleted && deleted.track===1 && audioRef.current) {
+        const stillHasAudioHere = next.some(c=>c.track===1 && currentTimeRef.current>=c.startSec && currentTimeRef.current<c.startSec+c.durationSec-c.trimStart-c.trimEnd);
+        if (!stillHasAudioHere) audioRef.current.pause();
+      }
+      return next;
+    });
+    setSelectedId(null);
+  } else if(selectedTextId){
+    setTextClips(prev=>prev.filter(c=>c.id!==selectedTextId));
+    setSelectedTextId(null);
+  } else if(selectedListId){
+    setListClips(prev=>prev.filter(c=>c.id!==selectedListId));
+    setSelectedListId(null);
+  } else if(selectedElementId){
+    setElements(prev=>prev.filter(e=>e.id!==selectedElementId));
+    setSelectedElementId(null);
+  } else if(selectedTransitionId){
+    setTransitions(prev=>prev.filter(t=>t.id!==selectedTransitionId));
+    setSelectedTransitionId(null);
+  }
  };
 
 
@@ -2053,7 +2072,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
          );})()}
          {isSel&&([{cursor:"nw-resize",top:"-5px",left:"-5px",edges:["n","w"]},{cursor:"n-resize",top:"-5px",left:"50%",transform:"translateX(-50%)",edges:["n"]},{cursor:"ne-resize",top:"-5px",right:"-5px",edges:["n","e"]},{cursor:"e-resize",top:"50%",right:"-5px",transform:"translateY(-50%)",edges:["e"]},{cursor:"se-resize",bottom:"-5px",right:"-5px",edges:["s","e"]},{cursor:"s-resize",bottom:"-5px",left:"50%",transform:"translateX(-50%)",edges:["s"]},{cursor:"sw-resize",bottom:"-5px",left:"-5px",edges:["s","w"]},{cursor:"w-resize",top:"50%",left:"-5px",transform:"translateY(-50%)",edges:["w"]}] as {cursor:string;top?:string;bottom?:string;left?:string;right?:string;transform?:string;edges:("n"|"s"|"e"|"w")[]}[]).map((h,i)=>(
           <div key={i} data-handle="true" style={{position:"absolute",top:h.top,bottom:(h as any).bottom,left:h.left,right:(h as any).right,transform:(h as any).transform,width:10,height:10,background:"#a78bfa",border:"1.5px solid #fff",borderRadius:2,cursor:h.cursor,zIndex:20,pointerEvents:"auto"}}
-           onMouseDown={e=>{e.preventDefault();e.stopPropagation();const container=(e.currentTarget as HTMLElement).closest<HTMLElement>('[data-preview-container]');if(!container)return;const rect=container.getBoundingClientRect();const sx=e.clientX,sy=e.clientY,ow=tc.width,oh=tc.height,ox=tc.x,oy=tc.y;const onMove=(ev:MouseEvent)=>{const dxP=((ev.clientX-sx)/rect.width)*100,dyP=((ev.clientY-sy)/rect.height)*100;const patch:Partial<TextClip>={};if(h.edges.includes("e"))patch.width=Math.min(Math.max(5,ow+dxP),(100-ox)*2);if(h.edges.includes("w")){const nw=Math.min(Math.max(5,ow-dxP),ox*2);patch.width=nw;patch.x=ox+(ow-nw)/2+dxP/2;}if(h.edges.includes("s"))patch.height=Math.min(Math.max(5,oh+dyP),(100-oy)*2);if(h.edges.includes("n")){const nh=Math.min(Math.max(5,oh-dyP),oy*2);patch.height=nh;patch.y=oy+(oh-nh)/2+dyP/2;}updateText(tc.id,patch);};const onUp=()=>{window.removeEventListener("mousemove",onMove);window.removeEventListener("mouseup",onUp);};window.addEventListener("mousemove",onMove);window.addEventListener("mouseup",onUp);}}/>
+           onMouseDown={e=>{e.preventDefault();e.stopPropagation();const container=(e.currentTarget as HTMLElement).closest<HTMLElement>('[data-preview-container]');if(!container)return;const rect=container.getBoundingClientRect();const sx=e.clientX,sy=e.clientY,ow=tc.width,oh=tc.height,ox=tc.x,oy=tc.y;const onMove=(ev:MouseEvent)=>{const dxP=((ev.clientX-sx)/rect.width)*100,dyP=((ev.clientY-sy)/rect.height)*100;const patch:Partial<TextClip>={};if(h.edges.includes("e"))patch.width=Math.min(Math.max(5,ow+dxP),(100-ox)*2);if(h.edges.includes("w")){const nw=Math.min(Math.max(5,ow-dxP),ox*2);patch.width=nw;/* right edge fixed: center shifts by dxP/2 */patch.x=ox+dxP/2;}if(h.edges.includes("s"))patch.height=Math.min(Math.max(5,oh+dyP),(100-oy)*2);if(h.edges.includes("n")){const nh=Math.min(Math.max(5,oh-dyP),oy*2);patch.height=nh;/* bottom edge fixed: center shifts by dyP/2 */patch.y=oy+dyP/2;}updateText(tc.id,patch);};const onUp=()=>{window.removeEventListener("mousemove",onMove);window.removeEventListener("mouseup",onUp);};window.addEventListener("mousemove",onMove);window.addEventListener("mouseup",onUp);}}/>
          ))}
         </div>
        );})}

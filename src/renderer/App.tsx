@@ -105,6 +105,7 @@ export const App: React.FC = () => {
     }
   }, [log]);
   const savedEditorTimeline = useRef<TimelineClip[] | null>(null);
+  const savedEditorTextClips = useRef<TextClip[] | null>(null);
   const [editorTimeline, setEditorTimeline] = useState<TimelineClip[] | null>(null);
   const [editorTextClips, setEditorTextClips] = useState<TextClip[] | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
@@ -2203,15 +2204,18 @@ export const App: React.FC = () => {
           label: v.localPath.split(/[\\/]/).pop() ?? v.localPath,
         }))}
         savedTimeline={savedEditorTimeline.current ?? undefined}
+        savedTextClips={savedEditorTextClips.current ?? undefined}
         onExport={(arrangedClips, textClips) => {
           // Keep the editor open; just show export dialog on top
           savedEditorTimeline.current = arrangedClips;
+          savedEditorTextClips.current = textClips;
           setEditorTimeline(arrangedClips);
           setEditorTextClips(textClips);
           setExportDialogOpen(true);
         }}
         onClose={(currentClips, textClips) => {
-          savedEditorTimeline.current = currentClips;  // â† saves on Back to App
+          savedEditorTimeline.current = currentClips;
+          savedEditorTextClips.current = textClips;  //â† saves on Back to App
           setEditorOpen(false);
         }}
       />

@@ -82,7 +82,8 @@ export async function exportTimeline(opts: ExportTimelineOptions): Promise<{ out
   });
 
   const safeTitle = (title || "export").replace(/[^\w\-]+/g, "_");
-  const ext = path.extname(videoSegments[0].path) || ".mp4";
+  // Always use .mp4 container regardless of source extension; it is compatible with all supported codecs.
+  const ext = ".mp4";
   const baseOut = path.join(outputFolder, `${safeTitle}${ext}`);
   let outputPath = baseOut;
   let idx = 1;
@@ -136,9 +137,10 @@ export async function exportTimeline(opts: ExportTimelineOptions): Promise<{ out
   });
 
   const audioExtraCount = audioSegments.length;
-  const totalInputs = videoCount + audioExtraCount;
 
   // [0:v][0:a][1:v][1:a]...concat=n=N:v=1:a=1[vcat][acat]
+  // Each video clip on track 0 is expected to have both a video and an audio stream.
+  // Clips that are audio-only (no video stream) should not be placed on track 0.
   const concatInputs = Array.from({ length: videoCount }, (_, i) => `[${i}:v][${i}:a]`).join("");
 
   let filter = `${concatInputs}concat=n=${videoCount}:v=1:a=1[vcat][acat]`;
@@ -173,8 +175,16 @@ export async function exportTimeline(opts: ExportTimelineOptions): Promise<{ out
       const text = (tc.label ?? "").toString();
       if (!text.trim().length) return;
 
-      // Basic escaping for ffmpeg
-      const esc = (s: string) => s.replace(/[\\:'\[\]]/g, m => `\\${m}`);
+      // Escape characters that are special in ffmpeg drawtext option values.
+      // Order matters: backslash first, then the rest.
+      const esc = (s: string) =>
+        s
+          .replace(/\\/g, "\\\\")    // backslash → \\
+          .replace(/'/g, "\\'")      // single-quote → \'
+          .replace(/:/g, "\\:")      // colon → \:  (option separator)
+          .replace(/,/g, "\\,")      // comma → \,  (filter-graph separator)
+          .replace(/\[/g, "\\[")     // brackets used in lavfi expression syntax
+          .replace(/\]/g, "\\]");
 
       const fontFamily = (tc.fontFamily || "Arial").toString();
       const fontSize = typeof tc.fontSize === "number" && tc.fontSize > 0 ? tc.fontSize : 32;

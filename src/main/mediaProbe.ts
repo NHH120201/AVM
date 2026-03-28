@@ -7,29 +7,45 @@ export interface MediaMeta {
   durationSec: number | null;
 }
 
-export function probeMedia(path: string, cwd: string): Promise<MediaMeta> {
+export function probeMedia(filePath: string, cwd: string): Promise<MediaMeta> {
   return new Promise((resolve) => {
     const args = [
       "-v","error",
       "-show_streams",
       "-show_format",
       "-print_format","json",
-      path,
+      filePath,
     ];
 
-    const child = spawn("ffprobe", args, { cwd });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn("ffprobe", args, { cwd });
+    } catch (spawnErr) {
+      // ffprobe not found or spawn failed — return safe defaults
+      console.error("[ffprobe spawn error]", spawnErr);
+      return resolve({ path: filePath, hasVideo: true, hasAudio: false, durationSec: null });
+    }
+
     let out = "";
     let err = "";
 
-    child.stdout.on("data", d => { out += d.toString(); });
-    child.stderr.on("data", d => { err += d.toString(); });
-    child.on("exit", code => {
+    child.stdout.on("data", (d: Buffer) => { out += d.toString(); });
+    child.stderr.on("data", (d: Buffer) => { err += d.toString(); });
+
+    // Handle ENOENT / spawn errors (ffprobe not in PATH)
+    child.on("error", (e: Error) => {
+      console.error("[ffprobe error]", e.message);
+      resolve({ path: filePath, hasVideo: true, hasAudio: false, durationSec: null });
+    });
+
+    child.on("exit", (code: number | null) => {
       if (code !== 0) {
         console.error("[ffprobe]", err || `ffprobe exited with code ${code}`);
+        // Return conservative defaults: assume video present, audio unknown → false (safer for export)
         return resolve({
-          path,
+          path: filePath,
           hasVideo: true,
-          hasAudio: true,
+          hasAudio: false,
           durationSec: null,
         });
       }
@@ -40,13 +56,13 @@ export function probeMedia(path: string, cwd: string): Promise<MediaMeta> {
         const hasAudio = streams.some((s: any) => s.codec_type === "audio");
         const durRaw = json.format?.duration;
         const durationSec = typeof durRaw === "string" ? parseFloat(durRaw) : null;
-        resolve({ path, hasVideo, hasAudio, durationSec: Number.isFinite(durationSec) ? durationSec : null });
+        resolve({ path: filePath, hasVideo, hasAudio, durationSec: Number.isFinite(durationSec as number) ? durationSec as number : null });
       } catch (e) {
         console.error("[ffprobe parse]", e);
         resolve({
-          path,
+          path: filePath,
           hasVideo: true,
-          hasAudio: true,
+          hasAudio: false,
           durationSec: null,
         });
       }
