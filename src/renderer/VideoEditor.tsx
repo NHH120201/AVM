@@ -131,6 +131,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ clips: initialClips=[]
  const [snap, setSnap] = useState(true);
  const [selectedId, setSelectedId] = useState<string|null>(null);
  const [history, setHistory] = useState<TimelineClip[][]>([]);
+ const [future, setFuture] = useState<TimelineClip[][]>([]);
  const [dropTarget, setDropTarget] = useState<number|null>(null);
  const [contextMenu, setContextMenu] = useState<{ x:number; y:number; clipId:string }|null>(null);
  const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
@@ -149,6 +150,9 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ clips: initialClips=[]
  const [mediaSearch, setMediaSearch] = useState("");
  const [exportTitle, setExportTitle] = useState("My project");
  const [selectedEffectPreset, setSelectedEffectPreset] = useState<string|null>(null);
+ const [mutedTracks, setMutedTracks] = useState<Set<number>>(new Set());
+ const mutedTracksRef = useRef<Set<number>>(new Set());
+ useEffect(() => { mutedTracksRef.current = mutedTracks; }, [mutedTracks]);
  const [autoEditRunning, setAutoEditRunning] = useState(false);
  const [autoEditStatus, setAutoEditStatus] = useState<string[]>([]);
  const [autoEditOpen, setAutoEditOpen] = useState(false);
@@ -256,8 +260,12 @@ const [audioOverlay, setAudioOverlay] = useState<null | "subtitles" | "tts">(nul
  const isBulkSelectedText = (tc: TextClip) =>
   bulkTextSelection === "all_subtitles" ? !!tc.subtitle : bulkTextSelection === "all_text" ? !tc.subtitle : false;
 
- const pushHistory = useCallback((snapshot: TimelineClip[]) => { setHistory(h => [...h.slice(-30), snapshot]); }, []);
- const undo = useCallback(() => { setHistory(h => { if(!h.length) return h; setClips(h[h.length-1]); return h.slice(0,-1); }); }, []);
+ const pushHistory = useCallback((snapshot: TimelineClip[]) => { setHistory(h => [...h.slice(-30), snapshot]); setFuture([]); }, []);
+ const undo = useCallback(() => { setHistory(h => { if(!h.length) return h; setFuture(f => [...f.slice(-30), clipsRef.current]); setClips(h[h.length-1]); return h.slice(0,-1); }); }, []);
+ const redo = useCallback(() => { setFuture(f => { if(!f.length) return f; const next=f[f.length-1]; setHistory(h=>[...h.slice(-30),clipsRef.current]); setClips(next); return f.slice(0,-1); }); }, []);
+ const toggleMuteTrack = useCallback((track: number) => {
+  setMutedTracks(prev => { const n = new Set(prev); if(n.has(track)) n.delete(track); else n.add(track); return n; });
+ }, []);
 
  const clipsRef = useRef(clips); const playingRef = useRef(playing);
  const currentTimeRef = useRef(currentTime); const totalDurRef = useRef(totalDuration);
@@ -339,7 +347,8 @@ const syncAudioToTime = useCallback((t: number) => {
    // Apply per-clip volume (scaled against master volume)
    const clipVol = typeof clip.clipVolume === "number" ? clip.clipVolume / 100 : 1;
    const masterVol = volume / 100;
-   const targetVol = Math.max(0, Math.min(1, clipVol * masterVol));
+   const trackMuted = mutedTracksRef.current.has(clip.track);
+   const targetVol = trackMuted ? 0 : Math.max(0, Math.min(1, clipVol * masterVol));
    if(Math.abs(vid.volume - targetVol) > 0.01) vid.volume = targetVol;
    const clipSpeed = typeof clip.speed === "number" && clip.speed > 0 ? clip.speed : 1;
    const tlTime=clip.startSec+(vid.currentTime-clip.trimStart)/clipSpeed;
@@ -421,6 +430,7 @@ const syncAudioToTime = useCallback((t: number) => {
   e.preventDefault();setPlaying(p=>!p);
  }
    if((e.ctrlKey||e.metaKey)&&e.key==="z")undo();
+   if((e.ctrlKey||e.metaKey)&&e.key==="y")redo();
       if(e.key==="Delete"||e.key==="Backspace"){
     const tag=(document.activeElement as HTMLElement)?.tagName;
     const isTyping=tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT";
@@ -438,7 +448,7 @@ const syncAudioToTime = useCallback((t: number) => {
    }
   };
   window.addEventListener("keydown",onKey);return()=>window.removeEventListener("keydown",onKey);
- },[selectedId,selectedTextId,selectedListId,selectedElementId,selectedTransitionId,audioOverlay,autoEditOpen,contextMenu,undo,pushHistory]);
+ },[selectedId,selectedTextId,selectedListId,selectedElementId,selectedTransitionId,audioOverlay,autoEditOpen,contextMenu,undo,redo,pushHistory]);
 
  const onClipMouseDown=(e:React.MouseEvent,id:string)=>{
   if(tool!=="select")return;e.preventDefault();e.stopPropagation();setSelectedId(id);
@@ -1069,8 +1079,9 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
     {/* Icon nav */}
     <div style={{width:56,background:"#1a1b1f",borderRight:"1px solid #26282e",display:"flex",flexDirection:"column",alignItems:"center",paddingTop:6,gap:1,flexShrink:0}}>
      {NAV_ITEMS.map(item=>(
-      <button key={item.id} onClick={()=>setActivePanel(item.id)} title={item.label} style={{width:48,minHeight:50,borderRadius:7,border:"none",cursor:"pointer",background:activePanel===item.id?"#23252c":"transparent",color:activePanel===item.id?"#e2e8f0":"#6b7280",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,transition:"all 0.1s"}}
-       onMouseEnter={e=>{if(activePanel!==item.id)(e.currentTarget.style.background="#1e2027");}} onMouseLeave={e=>{if(activePanel!==item.id)(e.currentTarget.style.background="transparent");}}>
+      <button key={item.id} onClick={()=>setActivePanel(item.id)} title={item.label}
+       className={`btn-nav${activePanel===item.id?" active":""}`}
+       style={{width:48,minHeight:50,borderRadius:7,border:"none",cursor:"pointer",background:activePanel===item.id?"#23252c":"transparent",color:activePanel===item.id?"#e2e8f0":"#6b7280",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,position:"relative"}}>
        <item.Icon size={16} strokeWidth={1.5} />
        <span style={{fontSize:9,fontWeight:500,letterSpacing:"0.02em"}}>{item.label}</span>
       </button>
@@ -1125,11 +1136,18 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
     {/* Content area */}
     <div style={{flex:1,background:"#0d0e11",display:"flex",flexDirection:"column",overflow:"hidden"}}>
      {activePanel==="media"&&(
-      <div style={{height:40,background:"#111214",borderBottom:"1px solid #26282e",display:"flex",alignItems:"center",padding:"0 16px",gap:4,flexShrink:0}}>
+      <div style={{background:"#111214",borderBottom:"1px solid #26282e",flexShrink:0}}>
+       <div style={{height:40,display:"flex",alignItems:"center",padding:"0 16px",gap:4}}>
        {["File import","Project files","Sample videos","Backgrounds"].map((tab,i)=>(
         <button key={tab} style={{background:"transparent",border:"none",borderBottom:i===0?"2px solid #3b82f6":"2px solid transparent",color:i===0?"#e2e8f0":"#6b7280",padding:"0 12px",height:"100%",fontSize:13,cursor:"pointer"}}
          onMouseEnter={e=>{if(i!==0)(e.currentTarget.style.color="#9ca3af");}} onMouseLeave={e=>{if(i!==0)(e.currentTarget.style.color="#6b7280");}}>{tab}</button>
        ))}
+       </div>
+       {binClips.length>0&&<div style={{display:"flex",alignItems:"center",gap:6,margin:"0 16px 8px",background:"#1a1b1f",border:"1px solid #26282e",borderRadius:7,padding:"6px 10px"}}>
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="#6b7280" strokeWidth="1.5"><circle cx="5.5" cy="5.5" r="4"/><path d="M9.5 9.5l2.5 2.5" strokeLinecap="round"/></svg>
+        <input placeholder="Search clips..." value={mediaSearch} onChange={e=>setMediaSearch(e.target.value)} style={{background:"transparent",border:"none",outline:"none",color:"#e2e8f0",fontSize:12,flex:1}}/>
+        {mediaSearch&&<button onClick={()=>setMediaSearch("")} style={{background:"transparent",border:"none",color:"#6b7280",cursor:"pointer",fontSize:12,padding:0,lineHeight:1}}>✕</button>}
+       </div>}
       </div>
      )}
      {activePanel==="media"&&(
@@ -1140,7 +1158,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
         onDrop={e=>{e.preventDefault();(e.currentTarget as HTMLDivElement).style.borderColor="#26282e";}}>
         {binClips.length===0?(<><div style={{fontSize:13,color:"#4b5563"}}>Drag files or folders here</div><button onClick={handleAddClips} style={{background:"#2563eb",border:"none",color:"#fff",padding:"9px 24px",borderRadius:20,fontSize:13,fontWeight:600,cursor:"pointer"}}>Add Files</button></>):(
          <div style={{width:"100%",height:"100%",overflowY:"auto",padding:16,display:"flex",flexWrap:"wrap",gap:12,alignContent:"flex-start"}}>
-          {binClips.map(clip=>(
+          {binClips.filter(c=>!mediaSearch||c.label.toLowerCase().includes(mediaSearch.toLowerCase())).map(clip=>(
            <div key={clip.path} draggable onDragStart={e=>onBinDragStart(e,clip)} style={{width:140,display:"flex",flexDirection:"column",gap:6,cursor:"grab"}} onMouseEnter={e=>(e.currentTarget as HTMLDivElement).style.opacity="0.8"} onMouseLeave={e=>(e.currentTarget as HTMLDivElement).style.opacity="1"}>
             <div style={{width:140,height:90,background:clip.color+"22",border:`1px solid ${clip.color}44`,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,overflow:"hidden",position:"relative"}}>
               {binThumbnails[clip.path]
@@ -2278,6 +2296,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
         <button onClick={()=>setVolume(v=>v===0?80:0)} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:3}} onMouseEnter={e=>(e.currentTarget.style.color="#e2e8f0")} onMouseLeave={e=>(e.currentTarget.style.color="#6b7280")}>
          {volume===0?<svg width="12" height="12" viewBox="0 0 13 13" fill="currentColor"><path d="M1 4.5h2.5l3.5-3v9L3.5 8H1V4.5z"/><line x1="8.5" y1="4.5" x2="12" y2="8" stroke="currentColor" strokeWidth="1.4"/><line x1="12" y1="4.5" x2="8.5" y2="8" stroke="currentColor" strokeWidth="1.4"/></svg>:<svg width="12" height="12" viewBox="0 0 13 13" fill="currentColor"><path d="M1 4.5h2.5l3.5-3v9L3.5 8H1V4.5z"/><path d="M8.5 4a3.5 3.5 0 010 5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round"/></svg>}
         </button>
+        <input type="range" min={0} max={100} value={volume} onChange={e=>setVolume(+e.target.value)} style={{width:56,accentColor:"#3b82f6"}} title={`Volume ${volume}%`}/>
         <button style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:3}} onMouseEnter={e=>(e.currentTarget.style.color="#e2e8f0")} onMouseLeave={e=>(e.currentTarget.style.color="#6b7280")}><svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"><path d="M1 4V1h3M8 1h3v3M11 8v3H8M4 11H1V8"/></svg></button>
         <button style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:3}} onMouseEnter={e=>(e.currentTarget.style.color="#e2e8f0")} onMouseLeave={e=>(e.currentTarget.style.color="#6b7280")}><svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"><circle cx="6" cy="6" r="1.8"/><path d="M6 1v1M6 10v1M1 6h1M10 6h1M2.2 2.2l.7.7M9.1 9.1l.7.7M9.8 2.2l-.7.7M3.1 9.1l-.7.7"/></svg></button>
        </div>
@@ -2296,7 +2315,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
     <div style={{width:1,height:20,background:"#26282e",margin:"0 3px"}}/>
     {([
       {Icon:Undo2, title:"Undo (Ctrl+Z)", fn:undo},
-      {Icon:Redo2, title:"Redo", fn:()=>{}},
+      {Icon:Redo2, title:"Redo (Ctrl+Y)", fn:redo},
       {Icon:Trash2, title:"Delete selected", fn:deleteSelected},
       {Icon:SplitSquareHorizontal, title:"Split at playhead", fn:()=>{if(selectedId)razorCut(selectedId,currentTime);}},
     ] as const).map((b,i)=>(
@@ -2359,12 +2378,14 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
       </div>
      ))}
      {/* Video 1 label (use Video icon) */}
-     <div onDragEnter={e=>onTrackDragEnter(e,0)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,0)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"center",background:dropTarget===0?"#1d4ed8":"#1e40af",boxShadow:dropTarget===0?"inset 0 0 0 1px #bfdbfe":"none"}}>
-      <img src={videoIcon} style={{width:22,height:22,objectFit:"contain",filter:"invert(1)"}} />
+     <div onDragEnter={e=>onTrackDragEnter(e,0)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,0)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"center",gap:4,background:dropTarget===0?"#1d4ed8":"#1e40af",boxShadow:dropTarget===0?"inset 0 0 0 1px #bfdbfe":"none",position:"relative"}}>
+      <img src={videoIcon} style={{width:18,height:18,objectFit:"contain",filter:"invert(1)"}} />
+      <button onClick={e=>{e.stopPropagation();toggleMuteTrack(0);}} title={mutedTracks.has(0)?"Unmute Video 1":"Mute Video 1"} style={{position:"absolute",bottom:3,right:3,background:"transparent",border:"none",cursor:"pointer",opacity:mutedTracks.has(0)?1:0.4,fontSize:10,color:"#fff",padding:0,lineHeight:1}} onMouseEnter={e=>(e.currentTarget as HTMLElement).style.opacity="1"} onMouseLeave={e=>(e.currentTarget as HTMLElement).style.opacity=mutedTracks.has(0)?"1":"0.4"}>{mutedTracks.has(0)?"🔇":"🔊"}</button>
      </div>
      {/* Audio 1 label (use Audio icon) */}
-     <div onDragEnter={e=>onTrackDragEnter(e,1)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,1)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"center",background:dropTarget===1?"#047857":"#065f46",boxShadow:dropTarget===1?"inset 0 0 0 1px #bbf7d0":"none"}}>
-      <img src={audioIcon} style={{width:22,height:22,objectFit:"contain",filter:"invert(1)"}} />
+     <div onDragEnter={e=>onTrackDragEnter(e,1)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,1)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"center",gap:4,background:dropTarget===1?"#047857":"#065f46",boxShadow:dropTarget===1?"inset 0 0 0 1px #bbf7d0":"none",position:"relative"}}>
+      <img src={audioIcon} style={{width:18,height:18,objectFit:"contain",filter:"invert(1)"}} />
+      <button onClick={e=>{e.stopPropagation();toggleMuteTrack(1);}} title={mutedTracks.has(1)?"Unmute Audio 1":"Mute Audio 1"} style={{position:"absolute",bottom:3,right:3,background:"transparent",border:"none",cursor:"pointer",opacity:mutedTracks.has(1)?1:0.4,fontSize:10,color:"#fff",padding:0,lineHeight:1}} onMouseEnter={e=>(e.currentTarget as HTMLElement).style.opacity="1"} onMouseLeave={e=>(e.currentTarget as HTMLElement).style.opacity=mutedTracks.has(1)?"1":"0.4"}>{mutedTracks.has(1)?"🔇":"🔊"}</button>
      </div>
      {extraTracks.filter(tr=>tr.type==="audio").map(tr=>(
       <div key={tr.id} onDragEnter={e=>onTrackDragEnter(e,tr.id)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,tr.id)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",padding:"0 10px",gap:6,background:dropTarget===tr.id?"#0d2218":"#161719",boxShadow:dropTarget===tr.id?"inset 0 0 0 1px #22c55e":"none"}}>
@@ -2447,7 +2468,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
        {dropTarget===1&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:10}}><span style={{fontSize:11,color:"#22c55e",background:"rgba(0,0,0,0.6)",padding:"2px 10px",borderRadius:4}}>Drop here</span></div>}
        {clips.filter(c=>c.track===1).map(clip=>{const visDur=clip.durationSec-clip.trimStart-clip.trimEnd;const w=Math.max(visDur*zoom,4);const isSel=clip.id===selectedId;return(
         <div id={`clip-${clip.id}`} key={clip.id} onMouseDown={e=>onClipMouseDown(e,clip.id)} onClick={e=>onClipClick(e,clip.id)} onContextMenu={e=>{e.preventDefault();e.stopPropagation();setContextMenu({x:e.clientX,y:e.clientY,clipId:clip.id});}} style={{position:"absolute",left:clip.startSec*zoom,top:4,width:w,height:44,background:clip.color+"bb",border:`1.5px solid ${isSel?"#fff":clip.color}`,borderRadius:6,overflow:"hidden",cursor:tool==="razor"?"crosshair":"grab",boxShadow:isSel?"0 0 0 1px white":"none",zIndex:isSel?5:1,outline:highlightIds.has(clip.id)?"2px solid #facc15":"none"}}>
-         <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",padding:"0 2px",overflow:"hidden"}}>{Array.from({length:Math.floor(w/4)},(_,i)=><div key={i} style={{width:2,flexShrink:0,marginRight:2,height:`${25+Math.abs(Math.sin(i*0.7))*20}%`,background:"rgba(255,255,255,0.32)",borderRadius:1}}/>)}</div>
+         <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",padding:"0 2px",overflow:"hidden"}}>{(()=>{const seed=clip.id.split("").reduce((a,c)=>a+c.charCodeAt(0),0);return Array.from({length:Math.floor(w/4)},(_,i)=>{const h=8+Math.abs(Math.sin(i*1.3+seed*0.01)*Math.cos(i*0.4+seed*0.02))*34;return <div key={i} style={{width:2,flexShrink:0,marginRight:2,height:`${h}px`,maxHeight:"90%",background:"rgba(34,197,94,0.55)",borderRadius:1}}/>;});})()}</div>
          <div style={{position:"absolute",top:3,left:6,fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.9)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:w-14,textShadow:"0 1px 3px rgba(0,0,0,0.8)",display:"flex",alignItems:"center",gap:2}}><span>{clip.label}</span>
           {clip.speed&&clip.speed!==1&&<span style={{background:"#f59e0b22",border:"1px solid #f59e0b44",borderRadius:3,padding:"1px 4px",fontSize:9,color:"#f59e0b",marginLeft:3}}>{clip.speed}×</span>}
           {clip.clipVolume===0&&<span style={{background:"#ef444422",border:"1px solid #ef444444",borderRadius:3,padding:"1px 4px",fontSize:9,color:"#ef4444",marginLeft:3}}>🔇</span>}
