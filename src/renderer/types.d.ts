@@ -1,4 +1,4 @@
-import type { TimelineClip, TextClip } from "./VideoEditor";
+import type { TimelineClip, TextClip, TransitionClip, ElementClip } from "./VideoEditor";
 
 export interface ManifestVideo {
   url: string | null;
@@ -23,10 +23,16 @@ export type NarrationMode = "none" | "generated" | "manual";
 export interface ExportTimelineParams {
   clips: TimelineClip[];
   textClips?: TextClip[];
+  transitions?: TransitionClip[];
+  elements?: ElementClip[];
   outputFolder: string;
   quality: "draft" | "good" | "high";
   resolution: string; // e.g. "1080x1920"
   title: string;
+  codec?: string;
+  fps?: string;
+  sampleRate?: string;
+  audioChannels?: "stereo" | "mono";
 }
 
 declare global {

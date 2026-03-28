@@ -4,9 +4,45 @@ import textIcon from "./icon/T.png";
 import videoIcon from "./icon/Video.png";
 import audioIcon from "./icon/Audio.png";
 
+export type TransitionType = "dissolve"|"fade_black"|"fade_white"|"wipe_left"|"wipe_right"|"push_left"|"push_right"|"zoom_in"|"zoom_out"|"spin"|"flash"|"glitch";
+export interface TransitionClip {
+  id: string;
+  afterClipId: string;
+  type: TransitionType;
+  durationSec: number;
+}
+export interface ClipEffects {
+  brightness?: number;
+  contrast?: number;
+  saturation?: number;
+  blur?: number;
+  vignette?: number;
+  filmGrain?: number;
+  lut?: string;
+}
+export interface ElementClip {
+  id: string;
+  type: "rect"|"circle"|"line"|"arrow"|"star"|"heart"|"emoji";
+  emoji?: string;
+  startSec: number;
+  durationSec: number;
+  x: number; y: number;
+  width: number; height: number;
+  color: string;
+  strokeColor: string;
+  strokeWidth: number;
+  rotation: number;
+  opacity: number;
+  track: 3;
+}
 export interface TimelineClip {
- id: string; path: string; label: string; durationSec: number; startSec: number;
- trimStart: number; trimEnd: number; track: number; color: string;
+  id: string; path: string; label: string; durationSec: number; startSec: number;
+  trimStart: number; trimEnd: number; track: number; color: string;
+  speed?: number;
+  clipVolume?: number;
+  fadeIn?: number;
+  fadeOut?: number;
+  effects?: ClipEffects;
 }
 export interface TextClip {
  id: string; startSec: number; durationSec: number; track: 2; label: string;
@@ -100,6 +136,12 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ clips: initialClips=[]
  const [bulkTextSelection, setBulkTextSelection] = useState<null | "all_subtitles" | "all_text">(null);
  const [listClips, setListClips] = useState<ListClip[]>([]);
  const [selectedListId, setSelectedListId] = useState<string|null>(null);
+ const [transitions, setTransitions] = useState<TransitionClip[]>([]);
+ const [selectedTransitionId, setSelectedTransitionId] = useState<string|null>(null);
+ const [elements, setElements] = useState<ElementClip[]>([]);
+ const [selectedElementId, setSelectedElementId] = useState<string|null>(null);
+ const [mediaSearch, setMediaSearch] = useState("");
+ const [exportTitle, setExportTitle] = useState("My project");
 
  // Local export dialog state (editor-owned export)
  const [exportOpen, setExportOpen] = useState(false);
@@ -330,10 +372,12 @@ const syncAudioToTime = useCallback((t: number) => {
     if(selectedId){setClips(prev=>{pushHistory(prev);return prev.filter(c=>c.id!==selectedId);});setSelectedId(null);}
     else if(selectedTextId){setTextClips(prev=>prev.filter(c=>c.id!==selectedTextId));setSelectedTextId(null);}
     else if(selectedListId){setListClips(prev=>prev.filter(c=>c.id!==selectedListId));setSelectedListId(null);}
+    else if(selectedElementId){setElements(prev=>prev.filter(e=>e.id!==selectedElementId));setSelectedElementId(null);}
+    else if(selectedTransitionId){setTransitions(prev=>prev.filter(t=>t.id!==selectedTransitionId));setSelectedTransitionId(null);}
     }
   };
   window.addEventListener("keydown",onKey);return()=>window.removeEventListener("keydown",onKey);
- },[selectedId,selectedTextId,selectedListId,undo,pushHistory]);
+ },[selectedId,selectedTextId,selectedListId,selectedElementId,selectedTransitionId,undo,pushHistory]);
 
  const onClipMouseDown=(e:React.MouseEvent,id:string)=>{
   if(tool!=="select")return;e.preventDefault();e.stopPropagation();setSelectedId(id);
@@ -812,7 +856,30 @@ const handleQwenTts = async () => {
          onMouseEnter={e=>{if(textCategory!==cat)(e.currentTarget.style.background="#1e2027");}} onMouseLeave={e=>{if(textCategory!==cat)(e.currentTarget.style.background="transparent");}}>{cat}</div>
        ))}
       </>)}
-      {activePanel!=="text"&&(<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#374151",fontSize:12}}>Coming soon</div>)}
+      {activePanel==="transitions"&&(
+        <>
+          {[{id:"all",label:"All"},{id:"dissolves",label:"Dissolves"},{id:"wipes",label:"Wipes"},{id:"motion",label:"Motion"},{id:"creative",label:"Creative"}].map(cat=>(
+            <div key={cat.id} style={{padding:"7px 14px",cursor:"pointer",fontSize:13,color:"#9ca3af",borderRadius:6,margin:"0 4px"}}
+             onMouseEnter={e=>(e.currentTarget as HTMLDivElement).style.background="#1e2027"} onMouseLeave={e=>(e.currentTarget as HTMLDivElement).style.background="transparent"}>{cat.label}</div>
+          ))}
+        </>
+      )}
+      {activePanel==="effects"&&(
+        <>
+          {[{id:"presets",label:"Presets"},{id:"adjust",label:"Adjust"}].map(cat=>(
+            <div key={cat.id} style={{padding:"7px 14px",cursor:"pointer",fontSize:13,color:"#9ca3af",borderRadius:6,margin:"0 4px"}}
+             onMouseEnter={e=>(e.currentTarget as HTMLDivElement).style.background="#1e2027"} onMouseLeave={e=>(e.currentTarget as HTMLDivElement).style.background="transparent"}>{cat.label}</div>
+          ))}
+        </>
+      )}
+      {activePanel==="elements"&&(
+        <>
+          {[{id:"shapes",label:"Shapes"},{id:"emojis",label:"Emojis"},{id:"overlays",label:"Overlays"}].map(cat=>(
+            <div key={cat.id} style={{padding:"7px 14px",cursor:"pointer",fontSize:13,color:"#9ca3af",borderRadius:6,margin:"0 4px"}}
+             onMouseEnter={e=>(e.currentTarget as HTMLDivElement).style.background="#1e2027"} onMouseLeave={e=>(e.currentTarget as HTMLDivElement).style.background="transparent"}>{cat.label}</div>
+          ))}
+        </>
+      )}
      </div>
     )}
 
@@ -1006,9 +1073,197 @@ const handleQwenTts = async () => {
       </div>
      )}
 
-     {(activePanel==="transitions"||activePanel==="effects"||activePanel==="elements")&&(
-  <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:10,color:"#374151"}}><span style={{fontSize:36}}>🔧</span><span style={{fontSize:13}}>Coming soon</span></div>
-)}
+     {activePanel==="transitions"&&(
+      <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+       <div style={{padding:"10px 16px 8px",borderBottom:"1px solid #26282e",flexShrink:0,fontSize:12,color:"#6b7280"}}>Click or drag a transition onto the timeline between two clips</div>
+       <div style={{flex:1,overflowY:"auto",padding:"14px 16px",display:"flex",flexWrap:"wrap",gap:12,alignContent:"flex-start"}}>
+        {([
+          {type:"dissolve",label:"Dissolve",color:"#6366f1",css:{background:"linear-gradient(90deg,#6366f120,#6366f180,#6366f120)",animation:"none"}},
+          {type:"fade_black",label:"Fade Black",color:"#000",css:{background:"linear-gradient(90deg,transparent,#000,transparent)"}},
+          {type:"fade_white",label:"Fade White",color:"#fff",css:{background:"linear-gradient(90deg,transparent,#fff,transparent)"}},
+          {type:"wipe_left",label:"Wipe Left",color:"#3b82f6",css:{background:"linear-gradient(270deg,#3b82f640,#3b82f6,#3b82f640)"}},
+          {type:"wipe_right",label:"Wipe Right",color:"#06b6d4",css:{background:"linear-gradient(90deg,#06b6d440,#06b6d4,#06b6d440)"}},
+          {type:"push_left",label:"Push Left",color:"#8b5cf6",css:{background:"linear-gradient(270deg,#8b5cf640,#8b5cf6,#8b5cf640)"}},
+          {type:"push_right",label:"Push Right",color:"#a78bfa",css:{background:"linear-gradient(90deg,#a78bfa40,#a78bfa,#a78bfa40)"}},
+          {type:"zoom_in",label:"Zoom In",color:"#10b981",css:{background:"radial-gradient(circle,#10b98180,transparent)"}},
+          {type:"zoom_out",label:"Zoom Out",color:"#34d399",css:{background:"radial-gradient(circle at center,transparent,#34d39980)"}},
+          {type:"spin",label:"Spin",color:"#f59e0b",css:{background:"conic-gradient(from 0deg,#f59e0b40,#f59e0b,#f59e0b40)"}},
+          {type:"flash",label:"Flash",color:"#fbbf24",css:{background:"linear-gradient(90deg,#fbbf2400,#fbbf24,#fbbf2400)"}},
+          {type:"glitch",label:"Glitch",color:"#ef4444",css:{background:"linear-gradient(90deg,#ef444440,#22d3ee80,#ef444480,#22d3ee40)"}},
+        ] as {type:TransitionType;label:string;color:string;css:React.CSSProperties}[]).map(tr=>(
+          <div key={tr.type}
+           onClick={()=>{
+            if(!selectedId)return;
+            const id=uid();
+            setTransitions(prev=>[...prev,{id,afterClipId:selectedId,type:tr.type,durationSec:0.5}]);
+           }}
+           style={{width:120,height:80,background:"#1a1b1f",border:"1px solid #26282e",borderRadius:8,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",gap:4,overflow:"hidden",position:"relative"}}
+           onMouseEnter={e=>{(e.currentTarget as HTMLDivElement).style.borderColor=tr.color;(e.currentTarget as HTMLDivElement).style.boxShadow=`0 0 8px ${tr.color}44`;}}
+           onMouseLeave={e=>{(e.currentTarget as HTMLDivElement).style.borderColor="#26282e";(e.currentTarget as HTMLDivElement).style.boxShadow="none";}}>
+           <div style={{position:"absolute",inset:0,...tr.css,opacity:0.7}}/>
+           <span style={{fontSize:10,fontWeight:600,color:"#e2e8f0",zIndex:1,textShadow:"0 1px 3px rgba(0,0,0,0.8)"}}>{tr.label}</span>
+          </div>
+        ))}
+       </div>
+       {transitions.length>0&&(
+        <div style={{padding:"8px 16px",borderTop:"1px solid #26282e",background:"#111214",flexShrink:0}}>
+         <div style={{fontSize:11,color:"#6b7280",marginBottom:6}}>Applied transitions ({transitions.length})</div>
+         {transitions.map(tr=>(
+          <div key={tr.id} onClick={()=>{setSelectedTransitionId(tr.id);}} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 8px",borderRadius:5,background:selectedTransitionId===tr.id?"#23252c":"transparent",cursor:"pointer",marginBottom:2}}>
+           <div style={{width:8,height:8,borderRadius:"50%",background:"#6366f1",flexShrink:0}}/>
+           <span style={{fontSize:11,color:"#9ca3af",flex:1}}>{tr.type.replace(/_/g," ")} → clip {tr.afterClipId.slice(-4)}</span>
+           {selectedTransitionId===tr.id&&(
+            <div style={{display:"flex",alignItems:"center",gap:4}}>
+             <span style={{fontSize:10,color:"#6b7280"}}>dur:</span>
+             <input type="range" min={0.1} max={2} step={0.1} value={tr.durationSec} onChange={e=>setTransitions(prev=>prev.map(t=>t.id===tr.id?{...t,durationSec:+e.target.value}:t))} style={{width:60,accentColor:"#6366f1"}}/>
+             <span style={{fontSize:10,color:"#9ca3af",minWidth:24}}>{tr.durationSec}s</span>
+             <button onClick={e=>{e.stopPropagation();setTransitions(prev=>prev.filter(t=>t.id!==tr.id));setSelectedTransitionId(null);}} style={{background:"#2d1a1a",border:"1px solid #450a0a",color:"#ef4444",borderRadius:4,padding:"2px 6px",fontSize:10,cursor:"pointer"}}>✕</button>
+            </div>
+           )}
+          </div>
+         ))}
+        </div>
+       )}
+      </div>
+     )}
+     {activePanel==="effects"&&(()=>{
+      const selClip=clips.find(c=>c.id===selectedId)??null;
+      const fx=selClip?.effects??{};
+      const updateFx=(patch:Partial<ClipEffects>)=>{
+        if(!selClip)return;
+        setClips(prev=>prev.map(c=>c.id===selClip.id?{...c,effects:{...c.effects,...patch}}:c));
+      };
+      const LUT_PRESETS=[
+        {id:"original",label:"Original",icon:"○",vals:{brightness:0,contrast:0,saturation:0,blur:0,vignette:0,filmGrain:0,lut:undefined}},
+        {id:"cinematic",label:"Cinematic",icon:"🎬",vals:{brightness:-5,contrast:15,saturation:-20}},
+        {id:"vintage",label:"Vintage",icon:"📷",vals:{brightness:10,contrast:5,saturation:-40}},
+        {id:"cool",label:"Cool",icon:"❄",vals:{saturation:-10,brightness:0}},
+        {id:"warm",label:"Warm",icon:"🌅",vals:{saturation:10,brightness:5}},
+        {id:"vivid",label:"Vivid",icon:"🌈",vals:{saturation:40,contrast:20}},
+        {id:"bw",label:"B&W",icon:"◐",vals:{saturation:-100}},
+        {id:"faded",label:"Faded",icon:"☁",vals:{contrast:-20,brightness:10}},
+        {id:"dramatic",label:"Dramatic",icon:"⚡",vals:{contrast:30,saturation:-10}},
+      ];
+      return(
+       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+        <div style={{padding:"10px 16px 8px",borderBottom:"1px solid #26282e",flexShrink:0,fontSize:12,color:selClip?"#9ca3af":"#6b7280"}}>
+         {selClip?`Editing: ${selClip.label}`:"Select a clip on the timeline to apply effects"}
+        </div>
+        <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
+         <div style={{fontSize:11,fontWeight:600,color:"#6b7280",letterSpacing:"0.08em",marginBottom:10}}>PRESETS</div>
+         <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:18}}>
+          {LUT_PRESETS.map(p=>(
+           <button key={p.id} onClick={()=>{if(selClip)setClips(prev=>prev.map(c=>c.id===selClip.id?{...c,effects:{...c.effects,...p.vals}}:c));}}
+            style={{background:"#1a1b1f",border:`1px solid ${fx.lut===p.id?"#6366f1":"#26282e"}`,borderRadius:8,padding:"8px 12px",cursor:selClip?"pointer":"default",color:selClip?"#e2e8f0":"#4b5563",fontSize:11,display:"flex",flexDirection:"column",alignItems:"center",gap:4,minWidth:64,opacity:selClip?1:0.5}}
+            onMouseEnter={e=>{if(selClip)(e.currentTarget as HTMLButtonElement).style.borderColor="#6366f1";}}
+            onMouseLeave={e=>{if(selClip)(e.currentTarget as HTMLButtonElement).style.borderColor=fx.lut===p.id?"#6366f1":"#26282e";}}>
+            <span style={{fontSize:18}}>{p.icon}</span>
+            <span>{p.label}</span>
+           </button>
+          ))}
+         </div>
+         <div style={{fontSize:11,fontWeight:600,color:"#6b7280",letterSpacing:"0.08em",marginBottom:10}}>ADJUST</div>
+         {[
+          {key:"brightness",label:"Brightness",min:-100,max:100,def:0},
+          {key:"contrast",label:"Contrast",min:-100,max:100,def:0},
+          {key:"saturation",label:"Saturation",min:-100,max:100,def:0},
+          {key:"blur",label:"Blur",min:0,max:20,def:0},
+          {key:"vignette",label:"Vignette",min:0,max:100,def:0},
+          {key:"filmGrain",label:"Film Grain",min:0,max:100,def:0},
+         ].map(sl=>(
+          <div key={sl.key} style={{marginBottom:12}}>
+           <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+            <span style={{fontSize:12,color:"#9ca3af"}}>{sl.label}</span>
+            <span style={{fontSize:11,color:"#6366f1",minWidth:32,textAlign:"right"}}>{(fx as any)[sl.key]??sl.def}</span>
+           </div>
+           <input type="range" min={sl.min} max={sl.max} value={(fx as any)[sl.key]??sl.def}
+            onChange={e=>updateFx({[sl.key]:+e.target.value})}
+            disabled={!selClip}
+            style={{width:"100%",accentColor:"#6366f1",cursor:selClip?"pointer":"default"}}/>
+          </div>
+         ))}
+         {selClip&&Object.values(fx).some(v=>v!==undefined&&v!==0&&v!=="")&&(
+          <button onClick={()=>setClips(prev=>prev.map(c=>c.id===selClip.id?{...c,effects:{}}:c))}
+           style={{background:"#1a0808",border:"1px solid #450a0a",color:"#ef4444",borderRadius:6,padding:"6px 14px",fontSize:12,cursor:"pointer",marginTop:4}}>
+           Reset all effects
+          </button>
+         )}
+        </div>
+       </div>
+      );
+     })()}
+     {activePanel==="elements"&&(
+      <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+       <div style={{padding:"10px 16px 8px",borderBottom:"1px solid #26282e",flexShrink:0,fontSize:12,color:"#6b7280"}}>Click to add element at playhead position</div>
+       <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
+        <div style={{fontSize:11,fontWeight:600,color:"#6b7280",letterSpacing:"0.08em",marginBottom:10}}>SHAPES</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:10,marginBottom:18}}>
+         {([
+           {type:"rect",label:"Rectangle",svg:<rect x="8" y="12" width="48" height="32" rx="2" fill="none" stroke="#6366f1" strokeWidth="3"/>},
+           {type:"circle",label:"Circle",svg:<circle cx="32" cy="28" r="20" fill="none" stroke="#6366f1" strokeWidth="3"/>},
+           {type:"line",label:"Line",svg:<line x1="8" y1="28" x2="56" y2="28" stroke="#6366f1" strokeWidth="3" strokeLinecap="round"/>},
+           {type:"arrow",label:"Arrow",svg:<><line x1="8" y1="28" x2="52" y2="28" stroke="#6366f1" strokeWidth="3" strokeLinecap="round"/><polygon points="52,20 64,28 52,36" fill="#6366f1"/></>},
+           {type:"star",label:"Star",svg:<polygon points="32,8 36,20 49,20 39,28 43,40 32,33 21,40 25,28 15,20 28,20" fill="none" stroke="#6366f1" strokeWidth="2"/>},
+           {type:"heart",label:"Heart",svg:<path d="M32 44C32 44 12 30 12 18a10 10 0 0 1 20 0 10 10 0 0 1 20 0c0 12-20 26-20 26z" fill="none" stroke="#6366f1" strokeWidth="3"/>},
+         ] as {type:"rect"|"circle"|"line"|"arrow"|"star"|"heart";label:string;svg:React.ReactNode}[]).map(shape=>(
+          <div key={shape.type} onClick={()=>{
+            const id=uid();
+            setElements(prev=>[...prev,{id,type:shape.type,startSec:currentTime,durationSec:5,x:40,y:40,width:20,height:15,color:"#6366f1",strokeColor:"#6366f1",strokeWidth:2,rotation:0,opacity:100,track:3}]);
+            setSelectedElementId(id);setSelectedId(null);setSelectedTextId(null);
+          }}
+          style={{width:72,height:64,background:"#1a1b1f",border:"1px solid #26282e",borderRadius:8,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",gap:3}}
+          onMouseEnter={e=>{(e.currentTarget as HTMLDivElement).style.borderColor="#6366f1";}} onMouseLeave={e=>{(e.currentTarget as HTMLDivElement).style.borderColor="#26282e";}}>
+          <svg width="64" height="44" viewBox="0 0 64 56">{shape.svg}</svg>
+          <span style={{fontSize:9,color:"#9ca3af"}}>{shape.label}</span>
+         </div>
+         ))}
+        </div>
+        <div style={{fontSize:11,fontWeight:600,color:"#6b7280",letterSpacing:"0.08em",marginBottom:10}}>EMOJIS</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:18}}>
+         {"🔥⭐💯❤️🎉🙌💪🎯🏆✨🚀💥🎊🌟😂😍🤩🥳💎🔑🎵🎶🌈🦋🐉👑🌙☀️❄️🌊".split("").map((emoji,i)=>(
+          <button key={i} onClick={()=>{
+            const id=uid();
+            setElements(prev=>[...prev,{id,type:"emoji",emoji,startSec:currentTime,durationSec:5,x:40,y:40,width:10,height:10,color:"#fff",strokeColor:"#000",strokeWidth:0,rotation:0,opacity:100,track:3}]);
+            setSelectedElementId(id);setSelectedId(null);setSelectedTextId(null);
+          }}
+          style={{width:40,height:40,background:"#1a1b1f",border:"1px solid #26282e",borderRadius:6,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}
+          onMouseEnter={e=>{(e.currentTarget as HTMLButtonElement).style.borderColor="#f59e0b";}} onMouseLeave={e=>{(e.currentTarget as HTMLButtonElement).style.borderColor="#26282e";}}>
+           {emoji}
+          </button>
+         ))}
+        </div>
+       </div>
+       {selectedElementId&&(()=>{
+        const el=elements.find(e=>e.id===selectedElementId);
+        if(!el)return null;
+        return(
+         <div style={{padding:"12px 16px",borderTop:"1px solid #26282e",background:"#111214",flexShrink:0}}>
+          <div style={{fontSize:11,fontWeight:600,color:"#6b7280",marginBottom:8}}>ELEMENT PROPERTIES</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+           <div style={{display:"flex",flexDirection:"column",gap:3}}>
+            <span style={{fontSize:10,color:"#6b7280"}}>Fill</span>
+            <input type="color" value={el.color} onChange={e=>setElements(prev=>prev.map(el2=>el2.id===el.id?{...el2,color:e.target.value}:el2))} style={{width:32,height:24,border:"none",background:"none",cursor:"pointer"}}/>
+           </div>
+           <div style={{display:"flex",flexDirection:"column",gap:3}}>
+            <span style={{fontSize:10,color:"#6b7280"}}>Stroke</span>
+            <input type="color" value={el.strokeColor} onChange={e=>setElements(prev=>prev.map(el2=>el2.id===el.id?{...el2,strokeColor:e.target.value}:el2))} style={{width:32,height:24,border:"none",background:"none",cursor:"pointer"}}/>
+           </div>
+           <div style={{flex:1,minWidth:100}}>
+            <span style={{fontSize:10,color:"#6b7280"}}>Rotation: {el.rotation}°</span>
+            <input type="range" min={0} max={360} value={el.rotation} onChange={e=>setElements(prev=>prev.map(el2=>el2.id===el.id?{...el2,rotation:+e.target.value}:el2))} style={{width:"100%",accentColor:"#6366f1"}}/>
+           </div>
+           <div style={{flex:1,minWidth:100}}>
+            <span style={{fontSize:10,color:"#6b7280"}}>Opacity: {el.opacity}%</span>
+            <input type="range" min={0} max={100} value={el.opacity} onChange={e=>setElements(prev=>prev.map(el2=>el2.id===el.id?{...el2,opacity:+e.target.value}:el2))} style={{width:"100%",accentColor:"#6366f1"}}/>
+           </div>
+          </div>
+          <button onClick={()=>{setElements(prev=>prev.filter(e=>e.id!==selectedElementId));setSelectedElementId(null);}}
+           style={{background:"#1a0808",border:"1px solid #450a0a",color:"#ef4444",borderRadius:5,padding:"4px 10px",fontSize:11,cursor:"pointer",marginTop:6}}>🗑 Delete</button>
+         </div>
+        );
+       })()}
+      </div>
+     )}
 {activePanel === "audio" && (
   <div
     style={{
@@ -1510,18 +1765,37 @@ const handleQwenTts = async () => {
       onMouseDown={e=>{e.preventDefault();const startX=e.clientX;const startW=previewWidth;const onMove=(ev:MouseEvent)=>{setPreviewWidth(Math.max(240,Math.min(800,startW+(startX-ev.clientX))));};const onUp=()=>{window.removeEventListener("mousemove",onMove);window.removeEventListener("mouseup",onUp);};window.addEventListener("mousemove",onMove);window.addEventListener("mouseup",onUp);}}
       onMouseEnter={e=>(e.currentTarget.style.background="rgba(255,255,255,0.15)")} onMouseLeave={e=>(e.currentTarget.style.background="transparent")}/>
      {selected&&!selectedTextId&&!selectedListId&&(
-      <div style={{height:36,background:"#16181f",borderBottom:"1px solid #26282e",display:"flex",alignItems:"center",padding:"0 10px",gap:8,flexShrink:0,overflowX:"auto"}}>
-       <span style={{fontSize:9,color:"#6b7280",flexShrink:0}}>CLIP</span>
-       <span style={{fontSize:10,color:"#e2e8f0",maxWidth:100,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selected.label}</span>
-       {[["START",fmt(selected.startSec)],["DUR",fmt(selected.durationSec-selected.trimStart-selected.trimEnd)],["IN",fmt(selected.trimStart)],["OUT",fmt(selected.trimEnd)]].map(([k,v])=>(
-        <div key={k} style={{display:"flex",gap:3,alignItems:"center",flexShrink:0}}><span style={{fontSize:8,color:"#6b7280"}}>{k}</span><span style={{fontFamily:"monospace",fontSize:10,color:"#22d3ee"}}>{v}</span></div>
-       ))}
-       <div style={{flex:1}}/><button onClick={deleteSelected} style={{background:"transparent",border:"1px solid #450a0a",color:"#ef4444",borderRadius:4,padding:"2px 7px",fontSize:9,cursor:"pointer"}}>Del</button>
+      <div style={{background:"#16181f",borderBottom:"1px solid #26282e",display:"flex",flexDirection:"column",flexShrink:0}}>
+       <div style={{height:36,display:"flex",alignItems:"center",padding:"0 10px",gap:8,overflowX:"auto"}}>
+        <span style={{fontSize:9,color:"#6b7280",flexShrink:0}}>CLIP</span>
+        <span style={{fontSize:10,color:"#e2e8f0",maxWidth:100,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selected.label}</span>
+        {[["START",fmt(selected.startSec)],["DUR",fmt(selected.durationSec-selected.trimStart-selected.trimEnd)],["IN",fmt(selected.trimStart)],["OUT",fmt(selected.trimEnd)]].map(([k,v])=>(
+         <div key={k} style={{display:"flex",gap:3,alignItems:"center",flexShrink:0}}><span style={{fontSize:8,color:"#6b7280"}}>{k}</span><span style={{fontFamily:"monospace",fontSize:10,color:"#22d3ee"}}>{v}</span></div>
+        ))}
+        <div style={{flex:1}}/><button onClick={deleteSelected} style={{background:"transparent",border:"1px solid #450a0a",color:"#ef4444",borderRadius:4,padding:"2px 7px",fontSize:9,cursor:"pointer"}}>Del</button>
+       </div>
+       <div style={{padding:"4px 10px 6px",display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+        <div style={{display:"flex",gap:3,alignItems:"center",flexShrink:0}}>
+         <span style={{fontSize:9,color:"#6b7280"}}>SPEED</span>
+         {[0.25,0.5,0.75,1,1.5,2,4].map(s=>(
+          <button key={s} onClick={()=>setClips(prev=>prev.map(c=>c.id===selectedId?{...c,speed:s}:c))}
+           style={{background:selected?.speed===s||(s===1&&!selected?.speed)?"#2563eb":"#1a1b1f",border:"1px solid #26282e",borderRadius:4,color:"#e2e8f0",padding:"2px 5px",fontSize:9,cursor:"pointer"}}>
+           {s}×
+          </button>
+         ))}
+        </div>
+        <div style={{display:"flex",gap:4,alignItems:"center",flex:1,minWidth:120}}>
+         <span style={{fontSize:9,color:"#6b7280",flexShrink:0}}>VOL {selected?.clipVolume??100}%</span>
+         <input type="range" min={0} max={200} value={selected?.clipVolume??100}
+          onChange={e=>setClips(prev=>prev.map(c=>c.id===selectedId?{...c,clipVolume:+e.target.value}:c))}
+          style={{flex:1,accentColor:"#22c55e",minWidth:60}}/>
+        </div>
+       </div>
       </div>
      )}
      <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"}}>
       <div data-preview-container="true" style={{position:"relative",height:"88%",aspectRatio:"9/16",maxWidth:"88%",background:"#000",borderRadius:6,overflow:"hidden",boxShadow:"0 0 0 1px #26282e, 0 8px 40px rgba(0,0,0,0.8)"}}>
-       <video ref={videoRef} muted preload="auto" style={{width:"100%",height:"100%",objectFit:"contain",display:clips.some(c=>c.track===0)?"block":"none"}}/>
+       <video ref={videoRef} muted preload="auto" style={{width:"100%",height:"100%",objectFit:"contain",display:clips.some(c=>c.track===0)?"block":"none",filter:(()=>{const fx=selected?.effects;if(!fx)return undefined;const parts:string[]=[];if(fx.brightness!==undefined&&fx.brightness!==0)parts.push(`brightness(${1+fx.brightness/100})`);if(fx.contrast!==undefined&&fx.contrast!==0)parts.push(`contrast(${1+fx.contrast/100})`);if(fx.saturation!==undefined&&fx.saturation!==0)parts.push(`saturate(${1+fx.saturation/100})`);if(fx.blur!==undefined&&fx.blur!==0)parts.push(`blur(${fx.blur}px)`);return parts.length?parts.join(" "):undefined;})()}}/>
       <audio ref={audioRef} style={{display:"none"}} muted={false} />
        {!clips.some(c=>c.track===0)&&(<div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}><span style={{fontSize:36,opacity:0.15}}>▶</span><span style={{fontSize:11,color:"#2d3748"}}>Drag a clip to Video 1 track</span></div>)}
 
@@ -1542,6 +1816,26 @@ const handleQwenTts = async () => {
          ))}
         </div>
        );})}
+
+       {/* Element overlays */}
+       {elements.filter(el=>currentTime>=el.startSec&&currentTime<el.startSec+el.durationSec).map(el=>(
+        <div key={el.id}
+         onClick={()=>{setSelectedElementId(el.id);setSelectedId(null);setSelectedTextId(null);}}
+         style={{position:"absolute",left:`${el.x}%`,top:`${el.y}%`,width:`${el.width}%`,transform:`rotate(${el.rotation}deg)`,opacity:el.opacity/100,cursor:"pointer",border:selectedElementId===el.id?"2px dashed #6366f1":"2px solid transparent",borderRadius:4}}>
+         {el.type==="emoji"?(
+          <span style={{fontSize:`${el.width*3}px`,userSelect:"none"}}>{el.emoji}</span>
+         ):(
+          <svg width="100%" viewBox="0 0 100 80" style={{overflow:"visible"}}>
+           {el.type==="rect"&&<rect x="5" y="5" width="90" height="70" rx="3" fill={el.color+"44"} stroke={el.strokeColor} strokeWidth={el.strokeWidth}/>}
+           {el.type==="circle"&&<ellipse cx="50" cy="40" rx="45" ry="35" fill={el.color+"44"} stroke={el.strokeColor} strokeWidth={el.strokeWidth}/>}
+           {el.type==="line"&&<line x1="5" y1="40" x2="95" y2="40" stroke={el.strokeColor} strokeWidth={el.strokeWidth+2} strokeLinecap="round"/>}
+           {el.type==="arrow"&&<><line x1="5" y1="40" x2="80" y2="40" stroke={el.strokeColor} strokeWidth={el.strokeWidth+2} strokeLinecap="round"/><polygon points="75,28 100,40 75,52" fill={el.strokeColor}/></>}
+           {el.type==="star"&&<polygon points="50,5 58,30 85,30 63,46 71,72 50,56 29,72 37,46 15,30 42,30" fill={el.color+"44"} stroke={el.strokeColor} strokeWidth={el.strokeWidth}/>}
+           {el.type==="heart"&&<path d="M50 70C50 70 10 46 10 24a20 20 0 0 1 40 0 20 20 0 0 1 40 0c0 22-40 46-40 46z" fill={el.color+"44"} stroke={el.strokeColor} strokeWidth={el.strokeWidth}/>}
+          </svg>
+         )}
+        </div>
+       ))}
 
        {/* List overlays */}
        {activeListClips.map(lc=>{
@@ -1764,8 +2058,11 @@ const handleQwenTts = async () => {
        {clips.filter(c=>c.track===0).map(clip=>{const visDur=clip.durationSec-clip.trimStart-clip.trimEnd;const w=Math.max(visDur*zoom,4);const isSel=clip.id===selectedId;return(
         <div id={`clip-${clip.id}`} key={clip.id} onMouseDown={e=>onClipMouseDown(e,clip.id)} onClick={e=>onClipClick(e,clip.id)} onContextMenu={e=>{e.preventDefault();e.stopPropagation();setContextMenu({x:e.clientX,y:e.clientY,clipId:clip.id});}} style={{position:"absolute",left:clip.startSec*zoom,top:4,width:w,height:44,background:clip.color+"bb",border:`1.5px solid ${isSel?"#fff":clip.color}`,borderRadius:6,overflow:"hidden",cursor:tool==="razor"?"crosshair":"grab",boxShadow:isSel?"0 0 0 1px white":"none",zIndex:isSel?5:1,outline:highlightIds.has(clip.id)?"2px solid #facc15":"none"}}>
          <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",padding:"0 2px",overflow:"hidden"}}>{Array.from({length:Math.floor(w/4)},(_,i)=><div key={i} style={{width:2,flexShrink:0,marginRight:2,height:`${25+Math.abs(Math.sin(i*0.7))*20}%`,background:"rgba(255,255,255,0.32)",borderRadius:1}}/>)}</div>
-         <div style={{position:"absolute",top:3,left:6,fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.9)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:w-14,textShadow:"0 1px 3px rgba(0,0,0,0.8)"}}>
+         <div style={{position:"absolute",top:3,left:6,fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.9)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:w-14,textShadow:"0 1px 3px rgba(0,0,0,0.8)",display:"flex",alignItems:"center",gap:2}}>
           {renamingId===clip.id?<input autoFocus value={renameValue} onChange={e=>setRenameValue(e.target.value)} onBlur={handleRenameCommit} onKeyDown={e=>{if(e.key==="Enter")handleRenameCommit();if(e.key==="Escape")setRenamingId(null);}} style={{background:"transparent",border:"none",borderBottom:"1px solid #facc15",color:"white",fontSize:"inherit",width:"90%",outline:"none"}} onClick={e=>e.stopPropagation()}/>:<span>{clip.label}</span>}
+          {clip.speed&&clip.speed!==1&&<span style={{background:"#f59e0b22",border:"1px solid #f59e0b44",borderRadius:3,padding:"1px 4px",fontSize:9,color:"#f59e0b",marginLeft:3}}>{clip.speed}×</span>}
+          {clip.clipVolume===0&&<span style={{background:"#ef444422",border:"1px solid #ef444444",borderRadius:3,padding:"1px 4px",fontSize:9,color:"#ef4444",marginLeft:3}}>🔇</span>}
+          {clip.effects&&Object.values(clip.effects).some(v=>v!==undefined&&v!==0)&&<span style={{background:"#6366f122",border:"1px solid #6366f144",borderRadius:3,padding:"1px 4px",fontSize:9,color:"#6366f1",marginLeft:3}}>FX</span>}
          </div>
          {w>64&&<div style={{position:"absolute",bottom:3,right:6,fontSize:9,color:"rgba(255,255,255,0.45)",fontFamily:"monospace"}}>{fmt(visDur)}</div>}
          {isSel&&(<><div onMouseDown={e=>onTrimMouseDown(e,clip.id,"start")} style={{position:"absolute",left:0,top:0,bottom:0,width:7,background:"rgba(255,255,255,0.45)",cursor:"ew-resize",borderRadius:"4px 0 0 4px",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{width:2,height:13,background:"rgba(0,0,0,0.4)",borderRadius:1}}/></div><div onMouseDown={e=>onTrimMouseDown(e,clip.id,"end")} style={{position:"absolute",right:0,top:0,bottom:0,width:7,background:"rgba(255,255,255,0.45)",cursor:"ew-resize",borderRadius:"0 4px 4px 0",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{width:2,height:13,background:"rgba(0,0,0,0.4)",borderRadius:1}}/></div></>)}
@@ -1779,7 +2076,11 @@ const handleQwenTts = async () => {
        {clips.filter(c=>c.track===1).map(clip=>{const visDur=clip.durationSec-clip.trimStart-clip.trimEnd;const w=Math.max(visDur*zoom,4);const isSel=clip.id===selectedId;return(
         <div id={`clip-${clip.id}`} key={clip.id} onMouseDown={e=>onClipMouseDown(e,clip.id)} onClick={e=>onClipClick(e,clip.id)} onContextMenu={e=>{e.preventDefault();e.stopPropagation();setContextMenu({x:e.clientX,y:e.clientY,clipId:clip.id});}} style={{position:"absolute",left:clip.startSec*zoom,top:4,width:w,height:44,background:clip.color+"bb",border:`1.5px solid ${isSel?"#fff":clip.color}`,borderRadius:6,overflow:"hidden",cursor:tool==="razor"?"crosshair":"grab",boxShadow:isSel?"0 0 0 1px white":"none",zIndex:isSel?5:1,outline:highlightIds.has(clip.id)?"2px solid #facc15":"none"}}>
          <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",padding:"0 2px",overflow:"hidden"}}>{Array.from({length:Math.floor(w/4)},(_,i)=><div key={i} style={{width:2,flexShrink:0,marginRight:2,height:`${25+Math.abs(Math.sin(i*0.7))*20}%`,background:"rgba(255,255,255,0.32)",borderRadius:1}}/>)}</div>
-         <div style={{position:"absolute",top:3,left:6,fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.9)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:w-14,textShadow:"0 1px 3px rgba(0,0,0,0.8)"}}>{clip.label}</div>
+         <div style={{position:"absolute",top:3,left:6,fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.9)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:w-14,textShadow:"0 1px 3px rgba(0,0,0,0.8)",display:"flex",alignItems:"center",gap:2}}><span>{clip.label}</span>
+          {clip.speed&&clip.speed!==1&&<span style={{background:"#f59e0b22",border:"1px solid #f59e0b44",borderRadius:3,padding:"1px 4px",fontSize:9,color:"#f59e0b",marginLeft:3}}>{clip.speed}×</span>}
+          {clip.clipVolume===0&&<span style={{background:"#ef444422",border:"1px solid #ef444444",borderRadius:3,padding:"1px 4px",fontSize:9,color:"#ef4444",marginLeft:3}}>🔇</span>}
+          {clip.effects&&Object.values(clip.effects).some(v=>v!==undefined&&v!==0)&&<span style={{background:"#6366f122",border:"1px solid #6366f144",borderRadius:3,padding:"1px 4px",fontSize:9,color:"#6366f1",marginLeft:3}}>FX</span>}
+         </div>
          {w>64&&<div style={{position:"absolute",bottom:3,right:6,fontSize:9,color:"rgba(255,255,255,0.45)",fontFamily:"monospace"}}>{fmt(visDur)}</div>}
          {isSel&&(<><div onMouseDown={e=>onTrimMouseDown(e,clip.id,"start")} style={{position:"absolute",left:0,top:0,bottom:0,width:7,background:"rgba(255,255,255,0.45)",cursor:"ew-resize",borderRadius:"4px 0 0 4px",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{width:2,height:13,background:"rgba(0,0,0,0.4)",borderRadius:1}}/></div><div onMouseDown={e=>onTrimMouseDown(e,clip.id,"end")} style={{position:"absolute",right:0,top:0,bottom:0,width:7,background:"rgba(255,255,255,0.45)",cursor:"ew-resize",borderRadius:"0 4px 4px 0",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{width:2,height:13,background:"rgba(0,0,0,0.4)",borderRadius:1}}/></div></>)}
         </div>
@@ -1921,7 +2222,8 @@ columnGap: 16,
 <div>
 <input
 type="text"
-defaultValue="New project"
+value={exportTitle}
+onChange={e=>setExportTitle(e.target.value)}
 disabled={exporting}
 style={{
 width: "100%",
@@ -2501,7 +2803,9 @@ codec: exportCodec,
 fps: exportFps,
 sampleRate: exportSampleRate,
 audioChannels: exportAudioChannels,
-title: "Editor export",
+title: exportTitle,
+transitions,
+elements,
 });
 
 if (result?.outputPath) {
