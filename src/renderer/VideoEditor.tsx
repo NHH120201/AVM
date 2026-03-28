@@ -151,6 +151,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ clips: initialClips=[]
  const [currentTime, setCurrentTime] = useState(0);
  const [volume, setVolume] = useState(80);
  const [zoom, setZoom] = useState(80);
+ const [timelineHeight, setTimelineHeight] = useState(260);
  const [snap, setSnap] = useState(true);
  const [selectedId, setSelectedId] = useState<string|null>(null);
  const [history, setHistory] = useState<TimelineClip[][]>([]);
@@ -2555,7 +2556,12 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
    </div>
 
    {/* Timeline */}
-   <div style={{height:260,display:"flex",overflow:"hidden",background:"#0d0e11",flexShrink:0}}>
+   <div style={{height:timelineHeight,display:"flex",overflow:"hidden",background:"#0d0e11",flexShrink:0,position:"relative"}}>
+    {/* Resize handle — drag up/down to change timeline height */}
+    <div style={{position:"absolute",top:0,left:0,right:0,height:4,cursor:"row-resize",zIndex:40,background:"transparent"}}
+     onMouseEnter={e=>(e.currentTarget.style.background="rgba(99,102,241,0.4)")}
+     onMouseLeave={e=>(e.currentTarget.style.background="transparent")}
+     onMouseDown={e=>{e.preventDefault();const startY=e.clientY,startH=timelineHeight;const onMove=(ev:MouseEvent)=>setTimelineHeight(Math.max(120,Math.min(600,startH-(ev.clientY-startY))));const onUp=()=>{window.removeEventListener("mousemove",onMove);window.removeEventListener("mouseup",onUp);};window.addEventListener("mousemove",onMove);window.addEventListener("mouseup",onUp);}}/>
     <div style={{width:100,background:"#161719",borderRight:"1px solid #26282e",flexShrink:0,display:"flex",flexDirection:"column"}}>
      <div style={{height:22,borderBottom:"1px solid #26282e",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
       <button title="Add new track" onClick={()=>setShowTrackMenu(m=>!m)} style={{display:"flex",alignItems:"center",gap:4,background:"transparent",border:"1px solid #374151",borderRadius:5,color:"#6b7280",fontSize:10,padding:"2px 7px",cursor:"pointer"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#3b82f6";e.currentTarget.style.color="#3b82f6";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="#374151";e.currentTarget.style.color="#6b7280";}}>
@@ -2580,8 +2586,9 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
       <img src={textIcon} style={{width:20,height:20,objectFit:"contain",filter:"invert(1)"}} />
      </div>
      {extraTracks.filter(tr=>tr.type==="video").map(tr=>(
-      <div key={tr.id} onDragEnter={e=>onTrackDragEnter(e,tr.id)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,tr.id)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",padding:"0 10px",gap:6,background:dropTarget===tr.id?"#0d2218":"#161719",boxShadow:dropTarget===tr.id?"inset 0 0 0 1px #22c55e":"none"}}>
-       <span style={{fontSize:12}}>🎬</span><span style={{fontSize:11,color:"#6b7280"}}>{tr.label}</span>
+      <div key={tr.id} onDragEnter={e=>onTrackDragEnter(e,tr.id)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,tr.id)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"center",gap:4,background:dropTarget===tr.id?"#1d4ed8":"#1e3a8a",boxShadow:dropTarget===tr.id?"inset 0 0 0 1px #bfdbfe":"none",position:"relative"}}>
+       <img src={videoIcon} style={{width:18,height:18,objectFit:"contain",filter:"invert(1)"}} />
+       <button onClick={e=>{e.stopPropagation();toggleMuteTrack(tr.id);}} title={mutedTracks.has(tr.id)?"Unmute":"Mute"} style={{position:"absolute",bottom:3,right:3,background:"transparent",border:"none",cursor:"pointer",opacity:mutedTracks.has(tr.id)?1:0.4,fontSize:10,color:"#fff",padding:0,lineHeight:1}} onMouseEnter={e=>(e.currentTarget as HTMLElement).style.opacity="1"} onMouseLeave={e=>(e.currentTarget as HTMLElement).style.opacity=mutedTracks.has(tr.id)?"1":"0.4"}>{mutedTracks.has(tr.id)?"🔇":"🔊"}</button>
       </div>
      ))}
      {/* Video 1 label (use Video icon) */}
@@ -2595,8 +2602,9 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
       <button onClick={e=>{e.stopPropagation();toggleMuteTrack(1);}} title={mutedTracks.has(1)?"Unmute Audio 1":"Mute Audio 1"} style={{position:"absolute",bottom:3,right:3,background:"transparent",border:"none",cursor:"pointer",opacity:mutedTracks.has(1)?1:0.4,fontSize:10,color:"#fff",padding:0,lineHeight:1}} onMouseEnter={e=>(e.currentTarget as HTMLElement).style.opacity="1"} onMouseLeave={e=>(e.currentTarget as HTMLElement).style.opacity=mutedTracks.has(1)?"1":"0.4"}>{mutedTracks.has(1)?"🔇":"🔊"}</button>
      </div>
      {extraTracks.filter(tr=>tr.type==="audio").map(tr=>(
-      <div key={tr.id} onDragEnter={e=>onTrackDragEnter(e,tr.id)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,tr.id)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",padding:"0 10px",gap:6,background:dropTarget===tr.id?"#0d2218":"#161719",boxShadow:dropTarget===tr.id?"inset 0 0 0 1px #22c55e":"none"}}>
-       <span style={{fontSize:12}}>🔊</span><span style={{fontSize:11,color:"#6b7280"}}>{tr.label}</span>
+      <div key={tr.id} onDragEnter={e=>onTrackDragEnter(e,tr.id)} onDragOver={onTrackDragOver} onDragLeave={onTrackDragLeave} onDrop={e=>onTrackDrop(e,tr.id)} style={{height:52,borderBottom:"1px solid #0f1010",display:"flex",alignItems:"center",justifyContent:"center",gap:4,background:dropTarget===tr.id?"#047857":"#064e3b",boxShadow:dropTarget===tr.id?"inset 0 0 0 1px #bbf7d0":"none",position:"relative"}}>
+       <img src={audioIcon} style={{width:18,height:18,objectFit:"contain",filter:"invert(1)"}} />
+       <button onClick={e=>{e.stopPropagation();toggleMuteTrack(tr.id);}} title={mutedTracks.has(tr.id)?"Unmute":"Mute"} style={{position:"absolute",bottom:3,right:3,background:"transparent",border:"none",cursor:"pointer",opacity:mutedTracks.has(tr.id)?1:0.4,fontSize:10,color:"#fff",padding:0,lineHeight:1}} onMouseEnter={e=>(e.currentTarget as HTMLElement).style.opacity="1"} onMouseLeave={e=>(e.currentTarget as HTMLElement).style.opacity=mutedTracks.has(tr.id)?"1":"0.4"}>{mutedTracks.has(tr.id)?"🔇":"🔊"}</button>
       </div>
      ))}
     </div>
