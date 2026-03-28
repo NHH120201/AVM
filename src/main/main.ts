@@ -64,6 +64,12 @@ function setupMenu() {
 app.whenReady().then(() => {
   createWindow();
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+
+  // Validate Python venv on startup
+  if (!fs.existsSync(VENV_PYTHON)) {
+    const msg = `Python not found at:\n${VENV_PYTHON}\n\nAI features (Whisper, TTS) will be unavailable.\n\nTo fix: run\n  python -m venv --upgrade "${path.dirname(path.dirname(VENV_PYTHON))}"`;
+    dialog.showErrorBox("Python venv missing", msg);
+  }
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 
@@ -315,6 +321,7 @@ ipcMain.handle("video:exportTimeline", async (_event, rawArgs: any) => {
 
 // ── Vosk STT ──────────────────────────────────────────────────────────────────
 ipcMain.handle("tts:transcribe", async (_event, args: { audioPath: string }) => {
+  if (!fs.existsSync(VENV_PYTHON)) throw new Error(`Python venv not found. Recreate: python -m venv --upgrade "${path.dirname(path.dirname(VENV_PYTHON))}"`);
   const { audioPath } = args;
   const modelPath = `${AVM_ROOT}\\Tools\\vosk-model-en-us-0.42-gigaspeech`;
   if (!fs.existsSync(audioPath))  throw new Error(`Audio file not found: ${audioPath}`);
@@ -342,6 +349,7 @@ ipcMain.handle("tts:transcribe", async (_event, args: { audioPath: string }) => 
 ipcMain.handle("tts:generate", async (_event, args: {
   text: string; outputPath?: string; promptPath?: string|null; exaggeration?: number; cfgWeight?: number;
 }) => {
+  if (!fs.existsSync(VENV_PYTHON)) throw new Error(`Python venv not found. Recreate: python -m venv --upgrade "${path.dirname(path.dirname(VENV_PYTHON))}"`);
   const { text, outputPath, promptPath, exaggeration, cfgWeight } = args;
   let outPath = outputPath?.trim().length ? outputPath : `${AVM_ROOT}\\Audio\\VoiceGenerated\\tts-output.wav`;
   if (!outputPath?.trim().length) {
@@ -373,6 +381,7 @@ ipcMain.handle("tts:generate", async (_event, args: {
 
 // ── Whisper Auto-Subtitles ────────────────────────────────────────────────────
 ipcMain.handle("whisper:transcribe", async (_event, args: { videoPath: string; language?: string }) => {
+  if (!fs.existsSync(VENV_PYTHON)) throw new Error(`Python venv not found. Recreate: python -m venv --upgrade "${path.dirname(path.dirname(VENV_PYTHON))}"`);
   const { videoPath, language } = args;
   if (!fs.existsSync(videoPath)) throw new Error(`Video not found: ${videoPath}`);
   const tmpDir = `${AVM_ROOT}\\Audio\\WhisperTmp`;
@@ -410,6 +419,7 @@ ipcMain.handle("whisper:transcribe", async (_event, args: { videoPath: string; l
 ipcMain.handle("qwen:tts", async (_event, args: {
   text: string; voice: string; instruct?: string; outputPath?: string;
 }) => {
+  if (!fs.existsSync(VENV_PYTHON)) throw new Error(`Python venv not found. Recreate: python -m venv --upgrade "${path.dirname(path.dirname(VENV_PYTHON))}"`);
   const { text, voice, instruct, outputPath } = args;
   const outDir = `${AVM_ROOT}\\Audio\\VoiceGenerated`;
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
