@@ -156,6 +156,17 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ clips: initialClips=[]
  const [autoEditRunning, setAutoEditRunning] = useState(false);
  const [autoEditStatus, setAutoEditStatus] = useState<string[]>([]);
  const [autoEditOpen, setAutoEditOpen] = useState(false);
+ const [autoEditOptions, setAutoEditOptions] = useState({
+   doArrange: true,
+   clipOrder: "sequential" as "sequential" | "shortest" | "longest",
+   clipGap: 0,
+   doTransitions: true,
+   transitionType: "dissolve" as TransitionType,
+   transitionDuration: 0.5,
+   doColorGrade: true,
+   colorPreset: "cinematic" as "cinematic" | "vivid" | "cool" | "warm",
+   doSubtitles: true,
+ });
 
  // Local export dialog state (editor-owned export)
  const [exportOpen, setExportOpen] = useState(false);
@@ -174,6 +185,11 @@ const [whisperLang, setWhisperLang] = useState("auto");
 const [whisperRunning, setWhisperRunning] = useState(false);
 const [whisperStatus, setWhisperStatus] = useState("");
 const [maxSubtitleWords, setMaxSubtitleWords] = useState(10); // 1-30 words per subtitle
+const [subFont, setSubFont] = useState("Arial");
+const [subFontSize, setSubFontSize] = useState(32);
+const [subStyle, setSubStyle] = useState("outline");
+const [subColor, setSubColor] = useState("#ffffff");
+const [subPosition, setSubPosition] = useState(82); // y% position: 82=bottom, 50=center, 18=top
 const [ttsText, setTtsText] = useState("");
 const [ttsVoice, setTtsVoice] = useState("Ryan");
 const [ttsInstruct, setTtsInstruct] = useState("");
@@ -765,17 +781,17 @@ const syncAudioToTime = useCallback((t: number) => {
             durationSec: visibleDur,
             track: 2,
             label: cleanLabel || rawText,
-            fontFamily: "Arial",
-            fontSize: 28,
-            color: "#ffffff",
+            fontFamily: subFont,
+            fontSize: subFontSize,
+            color: subColor,
             bold: false,
             italic: false,
             underline: false,
             x: 50,
-            y: 82,
+            y: subPosition,
             width: 80,
             height: 15,
-            textStyle: "outline",
+            textStyle: subStyle,
             subtitle: true,
             source: "whisper",
           });
@@ -814,17 +830,17 @@ const syncAudioToTime = useCallback((t: number) => {
           durationSec: visibleDur,
           track: 2,
           label: cleanLabel || rawText,
-          fontFamily: "Arial",
-          fontSize: 28,
-          color: "#ffffff",
+          fontFamily: subFont,
+          fontSize: subFontSize,
+          color: subColor,
           bold: false,
           italic: false,
           underline: false,
           x: 50,
-          y: 82,
+          y: subPosition,
           width: 80,
           height: 15,
-          textStyle: "outline",
+          textStyle: subStyle,
           subtitle: true,
           source: "whisper",
         });
@@ -940,73 +956,80 @@ const handleQwenTts = async () => {
 
  const handleAutoEdit = async () => {
   if (!binClips.length && !clips.length) return;
+  const opts = autoEditOptions;
   setAutoEditRunning(true);
   setAutoEditStatus(["🎬 Starting Auto Edit..."]);
   const log = (msg: string) => setAutoEditStatus(prev => [...prev, msg]);
   try {
-    // Step 1: Arrange bin clips onto track 0 sequentially
-    // `arranged` is populated here if clips are placed; used in later steps to avoid stale state.
+    // Step 1: Arrange
     let arranged: TimelineClip[] = [];
-    const sourceBin = binClips.length ? binClips : [];
-    if (sourceBin.length > 0 && !clips.some(c => c.track === 0)) {
-      log("📋 Arranging clips on timeline...");
-      let cursor = 0;
-      for (let i = 0; i < sourceBin.length; i++) {
-        const b = sourceBin[i];
-        const dur = typeof b.durationSec === "number" && b.durationSec > 0 ? b.durationSec : 5;
-        const clipColor = CLIP_COLORS[i % CLIP_COLORS.length];
-        arranged.push({
-          id: uid(), path: b.path, label: b.label, durationSec: dur,
-          startSec: cursor, trimStart: 0, trimEnd: 0, track: 0, color: clipColor,
-        });
-        if (b.hasAudio) {
-          arranged.push({
-            id: uid(), path: b.path, label: `${b.label} (audio)`, durationSec: dur,
-            startSec: cursor, trimStart: 0, trimEnd: 0, track: 1, color: clipColor,
-          });
+    if (opts.doArrange) {
+      const sourceBin = binClips.length ? [...binClips] : [];
+      if (sourceBin.length > 0 && !clips.some(c => c.track === 0)) {
+        log("📋 Arranging clips on timeline...");
+        // Sort based on order option
+        if (opts.clipOrder === "shortest") sourceBin.sort((a, b) => (a.durationSec ?? 5) - (b.durationSec ?? 5));
+        else if (opts.clipOrder === "longest") sourceBin.sort((a, b) => (b.durationSec ?? 5) - (a.durationSec ?? 5));
+        let cursor = 0;
+        for (let i = 0; i < sourceBin.length; i++) {
+          const b = sourceBin[i];
+          const dur = typeof b.durationSec === "number" && b.durationSec > 0 ? b.durationSec : 5;
+          const clipColor = CLIP_COLORS[i % CLIP_COLORS.length];
+          arranged.push({ id: uid(), path: b.path, label: b.label, durationSec: dur, startSec: cursor, trimStart: 0, trimEnd: 0, track: 0, color: clipColor });
+          if (b.hasAudio) arranged.push({ id: uid(), path: b.path, label: `${b.label} (audio)`, durationSec: dur, startSec: cursor, trimStart: 0, trimEnd: 0, track: 1, color: clipColor });
+          cursor += dur + opts.clipGap;
         }
-        cursor += dur;
+        setClips(arranged);
+        await new Promise(r => setTimeout(r, 100));
+        log(`✓ Placed ${sourceBin.length} clips in ${opts.clipOrder} order (${cursor.toFixed(1)}s total)`);
+      } else {
+        log("✓ Using existing timeline clips");
       }
-      setClips(arranged);
-      await new Promise(r => setTimeout(r, 100));
-      log(`✓ Placed ${sourceBin.length} clips (${cursor.toFixed(1)}s total)`);
     } else {
-      log("✓ Using existing timeline clips");
+      log("⏭ Skipped clip arrangement");
     }
 
-    // Step 2: Add dissolve transitions between clips
-    // Use `arranged` if clips were just placed, otherwise fall back to current clipsRef
-    log("🔀 Adding transitions...");
+    // Step 2: Transitions
     const currentVideoClips = (arranged.length > 0 ? arranged : clipsRef.current)
       .filter(c => c.track === 0)
       .sort((a, b) => a.startSec - b.startSec);
-    if (currentVideoClips.length > 1) {
-      const newTransitions: TransitionClip[] = currentVideoClips.slice(0, -1).map(c => ({
-        id: uid(), afterClipId: c.id, type: "dissolve" as TransitionType, durationSec: 0.5,
-      }));
-      setTransitions(newTransitions);
-      log(`✓ Added ${newTransitions.length} dissolve transitions`);
+    if (opts.doTransitions) {
+      log("🔀 Adding transitions...");
+      if (currentVideoClips.length > 1) {
+        const newTransitions: TransitionClip[] = currentVideoClips.slice(0, -1).map(c => ({
+          id: uid(), afterClipId: c.id, type: opts.transitionType, durationSec: opts.transitionDuration,
+        }));
+        setTransitions(newTransitions);
+        log(`✓ Added ${newTransitions.length} × ${opts.transitionType} transitions`);
+      }
+    } else {
+      log("⏭ Skipped transitions");
     }
 
-    // Step 3: Apply cinematic color grade to all video clips
-    log("🎨 Applying cinematic color grade...");
-    setClips(prev => prev.map(c => c.track === 0
-      ? { ...c, effects: { brightness: -5, contrast: 15, saturation: -20, vignette: 30, filmGrain: 10 } }
-      : c
-    ));
-    log("✓ Cinematic grade applied (contrast +15, saturation -20, vignette)");
+    // Step 3: Color grade
+    if (opts.doColorGrade) {
+      log("🎨 Applying color grade...");
+      const presets: Record<string, ClipEffects> = {
+        cinematic: { brightness: -5, contrast: 15, saturation: -20, vignette: 30, filmGrain: 10 },
+        vivid:     { brightness: 5,  contrast: 20, saturation: 30,  vignette: 0,  filmGrain: 0  },
+        cool:      { brightness: 0,  contrast: 10, saturation: -10, vignette: 20, filmGrain: 0  },
+        warm:      { brightness: 8,  contrast: 12, saturation: 15,  vignette: 15, filmGrain: 5  },
+      };
+      const grade = presets[opts.colorPreset] ?? presets.cinematic;
+      setClips(prev => prev.map(c => c.track === 0 ? { ...c, effects: grade } : c));
+      log(`✓ ${opts.colorPreset} grade applied`);
+    } else {
+      log("⏭ Skipped color grade");
+    }
 
-    // Step 4: Generate subtitles via Whisper
-    // Use the same source list derived above (not the stale `clips` closure variable)
+    // Step 4: Subtitles
     const allVideoClips = currentVideoClips;
-    const clipCount = allVideoClips.length;
-    if (clipCount > 0) {
-      log(`🎙 Transcribing ${clipCount} video clip(s) with Whisper...`);
+    if (opts.doSubtitles && allVideoClips.length > 0) {
+      log(`🎙 Transcribing ${allVideoClips.length} video clip(s) with Whisper...`);
       try {
         const api = (window as any).api;
-        const toTranscribe = allVideoClips;
         const allSegs: { start: number; end: number; text: string; words?: any[] }[] = [];
-        for (const vc of toTranscribe) {
+        for (const vc of allVideoClips) {
           const res = await api.whisperTranscribe({ videoPath: vc.path });
           const offset = vc.startSec - vc.trimStart;
           for (const seg of res.segments ?? []) {
@@ -1028,15 +1051,16 @@ const handleQwenTts = async () => {
               if (ce <= cs + 0.05) continue;
               const label = chunk.map((w: any) => w.word||"").join(" ").trim();
               if (!label) continue;
-              subClips.push({ id: uid(), startSec: cs, durationSec: Math.max(0.3, ce-cs), track: 2, label, fontFamily: "Arial", fontSize: 28, color: "#ffffff", bold: false, italic: false, underline: false, x: 50, y: 82, width: 80, height: 15, textStyle: "outline", subtitle: true, source: "whisper" });
+              // Use the whisper subtitle style from subStyle options (same as manual whisper panel)
+              subClips.push({ id: uid(), startSec: cs, durationSec: Math.max(0.3, ce-cs), track: 2, label, fontFamily: subFont, fontSize: subFontSize, color: subColor, bold: false, italic: false, underline: false, x: 50, y: subPosition, width: 80, height: 15, textStyle: subStyle, subtitle: true, source: "whisper" });
               lastE = ce;
             }
           }
           if (subClips.length) {
             setTextClips(prev => [...prev.filter(c => !(c.subtitle && c.source === "whisper")), ...subClips]);
-            log(`✓ Generated ${subClips.length} subtitle clips synced to speech`);
+            log(`✓ Generated ${subClips.length} subtitle clips`);
           } else {
-            log("⚠ No speech detected — no subtitles added");
+            log("⚠ No speech detected");
           }
         } else {
           log("⚠ Whisper returned no segments");
@@ -1044,6 +1068,8 @@ const handleQwenTts = async () => {
       } catch (e: any) {
         log(`⚠ Subtitle generation skipped: ${e.message || "Whisper unavailable"}`);
       }
+    } else if (!opts.doSubtitles) {
+      log("⏭ Skipped subtitles");
     }
 
     log("✅ Auto Edit complete!");
@@ -1721,23 +1747,120 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
             </div>
             {!autoEditRunning && <button onClick={() => setAutoEditOpen(false)} style={{ background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer", fontSize: 18 }}>×</button>}
           </div>
-          <div style={{ background: "#111214", border: "1px solid #1f2937", borderRadius: 8, padding: 14 }}>
-            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>What Auto Edit will do:</div>
-            {[
-              { icon: "📋", label: "Arrange clips", desc: clips.some(c => c.track === 0) ? `Use ${clips.filter(c => c.track === 0).length} existing Video 1 clip(s) already on timeline` : `Place all ${binClips.length} bin clip(s) on Video 1 track in sequence` },
-              { icon: "🔀", label: "Add transitions", desc: "Dissolve transition between every clip pair" },
-              { icon: "🎨", label: "Cinematic grade", desc: "Contrast +15, saturation -20, vignette for all clips" },
-              { icon: "🎙", label: "Auto subtitles", desc: "Whisper transcribes speech → synced text clips" },
-            ].map(step => (
-              <div key={step.icon} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 10 }}>
-                <span style={{ fontSize: 16, flexShrink: 0 }}>{step.icon}</span>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#e2e8f0" }}>{step.label}</div>
-                  <div style={{ fontSize: 11, color: "#6b7280" }}>{step.desc}</div>
-                </div>
+          {!autoEditRunning && (
+          <div style={{ background: "#111214", border: "1px solid #1f2937", borderRadius: 8, padding: 14, display: "flex", flexDirection: "column", gap: 10, maxHeight: 360, overflowY: "auto" }}>
+            {/* Step 1: Arrange */}
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <button onClick={() => setAutoEditOptions(o => ({...o, doArrange: !o.doArrange}))}
+                style={{ width: 18, height: 18, borderRadius: 4, border: "1.5px solid #6366f1", background: autoEditOptions.doArrange ? "#6366f1" : "transparent", cursor: "pointer", flexShrink: 0, marginTop: 2 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: autoEditOptions.doArrange ? "#e2e8f0" : "#4b5563", marginBottom: autoEditOptions.doArrange ? 6 : 0 }}>📋 Arrange clips</div>
+                {autoEditOptions.doArrange && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <span style={{ fontSize: 10, color: "#6b7280", width: 50 }}>Order:</span>
+                      {([["sequential","Sequential"],["shortest","Shortest first"],["longest","Longest first"]] as const).map(([v,l]) => (
+                        <button key={v} onClick={() => setAutoEditOptions(o => ({...o, clipOrder: v}))}
+                          style={{ background: autoEditOptions.clipOrder === v ? "#1e3a5f" : "#1a1b1f", border: `1px solid ${autoEditOptions.clipOrder === v ? "#3b82f6" : "#374151"}`, color: autoEditOptions.clipOrder === v ? "#93c5fd" : "#6b7280", borderRadius: 4, padding: "2px 7px", fontSize: 10, cursor: "pointer" }}>{l}</button>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <span style={{ fontSize: 10, color: "#6b7280", width: 50 }}>Gap:</span>
+                      {([0, 0.5, 1, 2] as const).map(g => (
+                        <button key={g} onClick={() => setAutoEditOptions(o => ({...o, clipGap: g}))}
+                          style={{ background: autoEditOptions.clipGap === g ? "#1e3a5f" : "#1a1b1f", border: `1px solid ${autoEditOptions.clipGap === g ? "#3b82f6" : "#374151"}`, color: autoEditOptions.clipGap === g ? "#93c5fd" : "#6b7280", borderRadius: 4, padding: "2px 7px", fontSize: 10, cursor: "pointer" }}>{g === 0 ? "No gap" : `${g}s`}</button>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 10, color: "#4b5563" }}>
+                      {clips.some(c => c.track === 0) ? `Using ${clips.filter(c => c.track === 0).length} existing clip(s)` : `Will place ${binClips.length} bin clip(s)`}
+                    </div>
+                  </div>
+                )}
               </div>
-            ))}
+            </div>
+
+            {/* Step 2: Transitions */}
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <button onClick={() => setAutoEditOptions(o => ({...o, doTransitions: !o.doTransitions}))}
+                style={{ width: 18, height: 18, borderRadius: 4, border: "1.5px solid #6366f1", background: autoEditOptions.doTransitions ? "#6366f1" : "transparent", cursor: "pointer", flexShrink: 0, marginTop: 2 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: autoEditOptions.doTransitions ? "#e2e8f0" : "#4b5563", marginBottom: autoEditOptions.doTransitions ? 6 : 0 }}>🔀 Transitions</div>
+                {autoEditOptions.doTransitions && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {(["dissolve","fade_black","fade_white","wipe_left","wipe_right","push_left","zoom_in","flash"] as TransitionType[]).map(t => (
+                        <button key={t} onClick={() => setAutoEditOptions(o => ({...o, transitionType: t}))}
+                          style={{ background: autoEditOptions.transitionType === t ? "#1e3a5f" : "#1a1b1f", border: `1px solid ${autoEditOptions.transitionType === t ? "#3b82f6" : "#374151"}`, color: autoEditOptions.transitionType === t ? "#93c5fd" : "#6b7280", borderRadius: 4, padding: "2px 7px", fontSize: 10, cursor: "pointer" }}>{t.replace(/_/g," ")}</button>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <span style={{ fontSize: 10, color: "#6b7280" }}>Duration:</span>
+                      {([0.3, 0.5, 1.0] as const).map(d => (
+                        <button key={d} onClick={() => setAutoEditOptions(o => ({...o, transitionDuration: d}))}
+                          style={{ background: autoEditOptions.transitionDuration === d ? "#1e3a5f" : "#1a1b1f", border: `1px solid ${autoEditOptions.transitionDuration === d ? "#3b82f6" : "#374151"}`, color: autoEditOptions.transitionDuration === d ? "#93c5fd" : "#6b7280", borderRadius: 4, padding: "2px 7px", fontSize: 10, cursor: "pointer" }}>{d}s</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Step 3: Color grade */}
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <button onClick={() => setAutoEditOptions(o => ({...o, doColorGrade: !o.doColorGrade}))}
+                style={{ width: 18, height: 18, borderRadius: 4, border: "1.5px solid #6366f1", background: autoEditOptions.doColorGrade ? "#6366f1" : "transparent", cursor: "pointer", flexShrink: 0, marginTop: 2 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: autoEditOptions.doColorGrade ? "#e2e8f0" : "#4b5563", marginBottom: autoEditOptions.doColorGrade ? 6 : 0 }}>🎨 Color grade</div>
+                {autoEditOptions.doColorGrade && (
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {([["cinematic","🎬 Cinematic"],["vivid","🌈 Vivid"],["cool","❄️ Cool"],["warm","🌅 Warm"]] as const).map(([v,l]) => (
+                      <button key={v} onClick={() => setAutoEditOptions(o => ({...o, colorPreset: v}))}
+                        style={{ background: autoEditOptions.colorPreset === v ? "#1e3a5f" : "#1a1b1f", border: `1px solid ${autoEditOptions.colorPreset === v ? "#3b82f6" : "#374151"}`, color: autoEditOptions.colorPreset === v ? "#93c5fd" : "#6b7280", borderRadius: 4, padding: "3px 8px", fontSize: 10, cursor: "pointer" }}>{l}</button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Step 4: Subtitles */}
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <button onClick={() => setAutoEditOptions(o => ({...o, doSubtitles: !o.doSubtitles}))}
+                style={{ width: 18, height: 18, borderRadius: 4, border: "1.5px solid #6366f1", background: autoEditOptions.doSubtitles ? "#6366f1" : "transparent", cursor: "pointer", flexShrink: 0, marginTop: 2 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: autoEditOptions.doSubtitles ? "#e2e8f0" : "#4b5563", marginBottom: autoEditOptions.doSubtitles ? 6 : 0 }}>🎙 Auto subtitles</div>
+                {autoEditOptions.doSubtitles && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 10, color: "#6b7280" }}>Font:</span>
+                      <select value={subFont} onChange={e => setSubFont(e.target.value)}
+                        style={{ background: "#1a1b1f", border: "1px solid #374151", color: "#e2e8f0", borderRadius: 4, padding: "2px 6px", fontSize: 10 }}>
+                        {["Arial","Impact","Georgia","Trebuchet MS","Arial Black"].map(f => <option key={f}>{f}</option>)}
+                      </select>
+                      <select value={subFontSize} onChange={e => setSubFontSize(+e.target.value)}
+                        style={{ background: "#1a1b1f", border: "1px solid #374151", color: "#e2e8f0", borderRadius: 4, padding: "2px 6px", fontSize: 10 }}>
+                        {[20,24,28,32,36,42].map(s => <option key={s} value={s}>{s}px</option>)}
+                      </select>
+                    </div>
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {[{id:"outline",label:"Outline"},{id:"blackbox",label:"Box"},{id:"semitrans",label:"Semi-trans"},{id:"plain",label:"Plain"},{id:"pill",label:"Pill"}].map(s => (
+                        <button key={s.id} onClick={() => setSubStyle(s.id)}
+                          style={{ background: subStyle === s.id ? "#6366f1" : "#1a1b1f", border: `1px solid ${subStyle === s.id ? "#6366f1" : "#374151"}`, color: subStyle === s.id ? "#fff" : "#6b7280", borderRadius: 4, padding: "2px 7px", fontSize: 10, cursor: "pointer" }}>{s.label}</button>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                      <span style={{ fontSize: 10, color: "#6b7280" }}>Position:</span>
+                      {[{label:"Top",y:15},{label:"Center",y:50},{label:"Bottom",y:82}].map(p => (
+                        <button key={p.label} onClick={() => setSubPosition(p.y)}
+                          style={{ background: subPosition === p.y ? "#1e3a5f" : "#1a1b1f", border: `1px solid ${subPosition === p.y ? "#3b82f6" : "#374151"}`, color: subPosition === p.y ? "#93c5fd" : "#6b7280", borderRadius: 4, padding: "2px 7px", fontSize: 10, cursor: "pointer" }}>{p.label}</button>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 10, color: "#4b5563" }}>Uses Whisper AI — requires video with speech</div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
+          )}
           {autoEditStatus.length > 0 && (
             <div style={{ background: "#0a0b0e", border: "1px solid #1f2937", borderRadius: 8, padding: "10px 14px", maxHeight: 160, overflowY: "auto", display: "flex", flexDirection: "column", gap: 3 }}>
               {autoEditStatus.map((line, i) => (
@@ -1950,6 +2073,59 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
                         fontSize: 11,
                       }}
                     />
+                  </div>
+                </div>
+                {/* Subtitle Style Options */}
+                <div style={{ background: "#0f1117", border: "1px solid #1f2937", borderRadius: 8, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280" }}>SUBTITLE STYLE</div>
+
+                  {/* Font + Size row */}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <div style={{ flex: 2 }}>
+                      <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 3 }}>Font</div>
+                      <select value={subFont} onChange={e => setSubFont(e.target.value)}
+                        style={{ width: "100%", background: "#1a1b1f", border: "1px solid #374151", color: "#e2e8f0", borderRadius: 5, padding: "4px 6px", fontSize: 12 }}>
+                        {["Arial","Impact","Georgia","Trebuchet MS","Arial Black","Verdana"].map(f => <option key={f}>{f}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 3 }}>Size</div>
+                      <select value={subFontSize} onChange={e => setSubFontSize(+e.target.value)}
+                        style={{ width: "100%", background: "#1a1b1f", border: "1px solid #374151", color: "#e2e8f0", borderRadius: 5, padding: "4px 6px", fontSize: 12 }}>
+                        {[20,24,28,32,36,42,48].map(s => <option key={s} value={s}>{s}px</option>)}
+                      </select>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 3 }}>Color</div>
+                      <input type="color" value={subColor} onChange={e => setSubColor(e.target.value)}
+                        style={{ width: "100%", height: 28, border: "1px solid #374151", borderRadius: 5, background: "none", cursor: "pointer" }} />
+                    </div>
+                  </div>
+
+                  {/* Style */}
+                  <div>
+                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>Style</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                      {[{id:"plain",label:"Plain"},{id:"outline",label:"Outline"},{id:"dropshadow",label:"Shadow"},{id:"blackbox",label:"Black Box"},{id:"semitrans",label:"Semi-trans"},{id:"yellowoutline",label:"Yellow"},{id:"pill",label:"Pill"},{id:"redbanner",label:"Red banner"}].map(s => (
+                        <button key={s.id} onClick={() => setSubStyle(s.id)}
+                          style={{ background: subStyle === s.id ? "#6366f1" : "#1a1b1f", border: `1px solid ${subStyle === s.id ? "#6366f1" : "#374151"}`, color: subStyle === s.id ? "#fff" : "#9ca3af", borderRadius: 5, padding: "3px 8px", fontSize: 10, cursor: "pointer" }}>
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Position */}
+                  <div>
+                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>Position</div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {[{label:"Top", y:15},{label:"Center", y:50},{label:"Bottom", y:82}].map(p => (
+                        <button key={p.label} onClick={() => setSubPosition(p.y)}
+                          style={{ flex: 1, background: subPosition === p.y ? "#1e3a5f" : "#1a1b1f", border: `1px solid ${subPosition === p.y ? "#3b82f6" : "#374151"}`, color: subPosition === p.y ? "#93c5fd" : "#9ca3af", borderRadius: 5, padding: "4px 0", fontSize: 11, cursor: "pointer" }}>
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
                 <button
