@@ -119,7 +119,7 @@ declare global {
         text: string;
         voice: string;
         instruct?: string;
-      }) => Promise<{ outputPath: string }>;
+      }) => Promise<{ outputPath: string; durationSec: number | null }>;
 
       // Export pipeline
       exportTimeline?: (params: ExportTimelineParams) => Promise<{

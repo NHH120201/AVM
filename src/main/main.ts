@@ -326,8 +326,9 @@ ipcMain.handle("tts:transcribe", async (_event, args: { audioPath: string }) => 
   const modelPath = `${AVM_ROOT}\\Tools\\vosk-model-en-us-0.42-gigaspeech`;
   if (!fs.existsSync(audioPath))  throw new Error(`Audio file not found: ${audioPath}`);
   if (!fs.existsSync(modelPath))  throw new Error(`Vosk model not found: ${modelPath}`);
-  const outJson  = `${AVM_ROOT}\\Audio\\Subtitles\\${path.basename(audioPath).replace(/\.wav$/i,"")}.vosk.json`;
-  const pcmPath  = audioPath.replace(/\.wav$/i, "_pcm16.wav");
+  const outJson  = `${AVM_ROOT}\\Audio\\Subtitles\\${path.basename(audioPath).replace(/\.[^.]+$/i,"")}.vosk.json`;
+  // Always derive pcmPath from a fixed temp location to avoid overwriting non-wav source files
+  const pcmPath  = path.join(`${AVM_ROOT}\\Audio\\Subtitles`, path.basename(audioPath).replace(/\.[^.]+$/i,"") + "_pcm16.wav");
   await new Promise<void>((resolve, reject) => {
     const child = spawn("ffmpeg", ["-y","-i",audioPath,"-ac","1","-ar","16000","-sample_fmt","s16",pcmPath], { cwd: AVM_ROOT });
     child.on("exit", code => code===0 ? resolve() : reject(new Error(`ffmpeg pcm16 exited ${code}`)));
@@ -386,7 +387,7 @@ ipcMain.handle("whisper:transcribe", async (_event, args: { videoPath: string; l
   if (!fs.existsSync(videoPath)) throw new Error(`Video not found: ${videoPath}`);
   const tmpDir = `${AVM_ROOT}\\Audio\\WhisperTmp`;
   if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-  const whisperArgs = ["-m","whisper", videoPath, "--output_format","json", "--output_dir",tmpDir, "--model","medium", "--word_timestamps", "True"];
+  const whisperArgs = ["-m","whisper", videoPath, "--output_format","json", "--output_dir",tmpDir, "--model","medium", "--word_timestamps", "true"];
   if (language && language !== "auto") whisperArgs.push("--language", language);
   await new Promise<void>((resolve, reject) => {
     const child = spawn(VENV_PYTHON, whisperArgs, { cwd: AVM_ROOT });

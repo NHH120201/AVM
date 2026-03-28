@@ -331,8 +331,6 @@ const syncAudioToTime = useCallback((t: number) => {
   const aud = audioRef.current;
 
   if (playing) {
-    console.log("All Clips:", clips); 
-    console.log("Audio Clips on Track 1:", clips.filter(c => c.track === 1));
     syncVideoToTime(currentTimeRef.current);
     syncAudioToTime(currentTimeRef.current);
 
@@ -434,13 +432,15 @@ const syncAudioToTime = useCallback((t: number) => {
  const onTrimMouseDown=(e:React.MouseEvent,id:string,edge:"start"|"end")=>{
   e.preventDefault();e.stopPropagation();
   const clip=clips.find(c=>c.id===id)!;
+  // Snapshot current clips for undo BEFORE the trim begins (not inside onUp where clips is stale)
+  const snapshotForUndo = clipsRef.current.slice();
   trimRef.current={id,edge,startX:e.clientX,origTS:clip.trimStart,origTE:clip.trimEnd,origDur:clip.durationSec,origStart:clip.startSec};
   const onMove=(ev:MouseEvent)=>{
    if(!trimRef.current)return;
    const{id:tid,edge:te,startX,origTS,origTE,origDur,origStart}=trimRef.current;const dx=(ev.clientX-startX)/zoom;
    setClips(prev=>prev.map(c=>{if(c.id!==tid)return c;if(te==="start"){const ts=Math.max(0,Math.min(origTS+dx,origDur-origTE-0.5));return{...c,trimStart:ts,startSec:origStart+(ts-origTS)};}else{const te2=Math.max(0,Math.min(origTE-dx,origDur-origTS-0.5));return{...c,trimEnd:te2};}}));
   };
-  const onUp=()=>{pushHistory(clips);trimRef.current=null;window.removeEventListener("mousemove",onMove);window.removeEventListener("mouseup",onUp);};
+  const onUp=()=>{pushHistory(snapshotForUndo);trimRef.current=null;window.removeEventListener("mousemove",onMove);window.removeEventListener("mouseup",onUp);};
   window.addEventListener("mousemove",onMove);window.addEventListener("mouseup",onUp);
  };
 
@@ -797,6 +797,13 @@ const handleQwenTts = async () => {
     }]);
 
     // 2) Auto-attach as an audio clip on track 1 at timeline start
+    // Compute clip placement position before updating state, using the current ref value
+    // which is always up-to-date (unlike the stale `clips` closure variable).
+    const track1ClipsNow = clipsRef.current.filter(c => c.track === 1);
+    const clipPlacedAt = track1ClipsNow.length > 0
+      ? Math.max(...track1ClipsNow.map(c => c.startSec + c.durationSec - c.trimStart - c.trimEnd))
+      : currentTimeRef.current;
+
     setClips(prev => {
       const baseDur = durationSec && durationSec > 0 ? durationSec : 10;
       // Place after existing audio clips on track 1, or at playhead
@@ -820,13 +827,6 @@ const handleQwenTts = async () => {
 
     setTtsStatus("✓ Voice generated and added to Audio 1 track.");
     setAudioOverlay(null);
-    // Auto-sync subtitles from TTS audio
-    const clipPlacedAt = (() => {
-      const t1Clips = clips.filter(c => c.track === 1);
-      return t1Clips.length > 0
-        ? Math.max(...t1Clips.map(c => c.startSec + c.durationSec - c.trimStart - c.trimEnd))
-        : currentTimeRef.current;
-    })();
     try {
       const syncResult = await (window as any).api.whisperTranscribe?.({ videoPath: outputPath });
       if (syncResult?.segments?.length) {
@@ -867,11 +867,12 @@ const handleQwenTts = async () => {
   const log = (msg: string) => setAutoEditStatus(prev => [...prev, msg]);
   try {
     // Step 1: Arrange bin clips onto track 0 sequentially
+    // `arranged` is populated here if clips are placed; used in later steps to avoid stale state.
+    let arranged: TimelineClip[] = [];
     const sourceBin = binClips.length ? binClips : [];
     if (sourceBin.length > 0 && !clips.some(c => c.track === 0)) {
       log("📋 Arranging clips on timeline...");
       let cursor = 0;
-      const arranged: TimelineClip[] = [];
       for (let i = 0; i < sourceBin.length; i++) {
         const b = sourceBin[i];
         const dur = typeof b.durationSec === "number" && b.durationSec > 0 ? b.durationSec : 5;
@@ -896,9 +897,11 @@ const handleQwenTts = async () => {
     }
 
     // Step 2: Add dissolve transitions between clips
+    // Use `arranged` if clips were just placed, otherwise fall back to current clipsRef
     log("🔀 Adding transitions...");
-    const videoClips = (clips.length > 0 ? clips : []).filter(c => c.track === 0).sort((a, b) => a.startSec - b.startSec);
-    const currentVideoClips = videoClips;
+    const currentVideoClips = (arranged.length > 0 ? arranged : clipsRef.current)
+      .filter(c => c.track === 0)
+      .sort((a, b) => a.startSec - b.startSec);
     if (currentVideoClips.length > 1) {
       const newTransitions: TransitionClip[] = currentVideoClips.slice(0, -1).map(c => ({
         id: uid(), afterClipId: c.id, type: "dissolve" as TransitionType, durationSec: 0.5,
@@ -916,13 +919,14 @@ const handleQwenTts = async () => {
     log("✓ Cinematic grade applied (contrast +15, saturation -20, vignette)");
 
     // Step 4: Generate subtitles via Whisper
-    const allVideoClips = clips.filter(c => c.track === 0).sort((a, b) => a.startSec - b.startSec);
-    const clipCount = allVideoClips.length || currentVideoClips.length;
+    // Use the same source list derived above (not the stale `clips` closure variable)
+    const allVideoClips = currentVideoClips;
+    const clipCount = allVideoClips.length;
     if (clipCount > 0) {
       log(`🎙 Transcribing ${clipCount} video clip(s) with Whisper...`);
       try {
         const api = (window as any).api;
-        const toTranscribe = allVideoClips.length ? allVideoClips : currentVideoClips;
+        const toTranscribe = allVideoClips;
         const allSegs: { start: number; end: number; text: string; words?: any[] }[] = [];
         for (const vc of toTranscribe) {
           const res = await api.whisperTranscribe({ videoPath: vc.path });
@@ -1387,7 +1391,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
         </div>
         <div style={{fontSize:11,fontWeight:600,color:"#6b7280",letterSpacing:"0.08em",marginBottom:10}}>EMOJIS</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:18}}>
-         {"🔥⭐💯❤️🎉🙌💪🎯🏆✨🚀💥🎊🌟😂😍🤩🥳💎🔑🎵🎶🌈🦋🐉👑🌙☀️❄️🌊".split("").map((emoji,i)=>(
+         {Array.from("🔥⭐💯❤️🎉🙌💪🎯🏆✨🚀💥🎊🌟😂😍🤩🥳💎🔑🎵🎶🌈🦋🐉👑🌙☀️❄️🌊").map((emoji,i)=>(
           <button key={i} onClick={()=>{
             const id=uid();
             setElements(prev=>[...prev,{id,type:"emoji",emoji,startSec:currentTime,durationSec:5,x:40,y:40,width:10,height:10,color:"#fff",strokeColor:"#000",strokeWidth:0,rotation:0,opacity:100,track:3}]);
@@ -1596,7 +1600,7 @@ const onTextClipMouseDown=(e:React.MouseEvent,id:string)=>{
           <div style={{ background: "#111214", border: "1px solid #1f2937", borderRadius: 8, padding: 14 }}>
             <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>What Auto Edit will do:</div>
             {[
-              { icon: "📋", label: "Arrange clips", desc: `Place all ${binClips.length} bin clip(s) on Video 1 track in sequence` },
+              { icon: "📋", label: "Arrange clips", desc: clips.some(c => c.track === 0) ? `Use ${clips.filter(c => c.track === 0).length} existing Video 1 clip(s) already on timeline` : `Place all ${binClips.length} bin clip(s) on Video 1 track in sequence` },
               { icon: "🔀", label: "Add transitions", desc: "Dissolve transition between every clip pair" },
               { icon: "🎨", label: "Cinematic grade", desc: "Contrast +15, saturation -20, vignette for all clips" },
               { icon: "🎙", label: "Auto subtitles", desc: "Whisper transcribes speech → synced text clips" },
@@ -2767,11 +2771,8 @@ fontSize: 12,
 <option value="2560x1440">
 2560×1440 (2K) — 16:9
 </option>
-<option value="1920x1080">
-1920×1080 (Full HD) — 16:9
-</option>
 <option value="720x1280">
-720×1280 — 9:16
+720×1280 — 9:16 (HD)
 </option>
 </select>
 </div>
