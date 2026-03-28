@@ -27,7 +27,10 @@ function createWindow() {
     minHeight: 600,
     frame: true,
     autoHideMenuBar: true,
-    webPreferences: { preload: path.join(__dirname, "preload.js") }
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      autoplayPolicy: "no-user-gesture-required",
+    }
   });
   mainWindow.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
   mainWindow.on("closed", () => { mainWindow = null; });

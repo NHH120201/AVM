@@ -333,7 +333,10 @@ const syncAudioToTime = useCallback((t: number) => {
     syncVideoToTime(currentTimeRef.current);
     syncAudioToTime(currentTimeRef.current);
 
-    if (vid) vid.play().catch(() => {});
+    if (vid) {
+      vid.volume = volume / 100;     // Ensure video track audio is at correct volume
+      vid.play().catch(() => {});
+    }
 
     // --- AUDIO FIX START ---
     if (aud) {
@@ -354,7 +357,10 @@ const syncAudioToTime = useCallback((t: number) => {
   return () => cancelAnimationFrame(rafRef.current);
  }, [playing, tick, syncVideoToTime, syncAudioToTime, volume]); // Added 'volume' to dependency array
 
- useEffect(()=>{if(audioRef.current)audioRef.current.volume=volume/100;},[volume]);
+ useEffect(()=>{
+  if(audioRef.current)audioRef.current.volume=volume/100;
+  if(videoRef.current)videoRef.current.volume=volume/100;
+ },[volume]);
 
  useEffect(()=>{
   const onKey=(e:KeyboardEvent)=>{
@@ -1795,7 +1801,7 @@ const handleQwenTts = async () => {
      )}
      <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"}}>
       <div data-preview-container="true" style={{position:"relative",height:"88%",aspectRatio:"9/16",maxWidth:"88%",background:"#000",borderRadius:6,overflow:"hidden",boxShadow:"0 0 0 1px #26282e, 0 8px 40px rgba(0,0,0,0.8)"}}>
-       <video ref={videoRef} muted preload="auto" style={{width:"100%",height:"100%",objectFit:"contain",display:clips.some(c=>c.track===0)?"block":"none",filter:(()=>{const fx=selected?.effects;if(!fx)return undefined;const parts:string[]=[];if(fx.brightness!==undefined&&fx.brightness!==0)parts.push(`brightness(${1+fx.brightness/100})`);if(fx.contrast!==undefined&&fx.contrast!==0)parts.push(`contrast(${1+fx.contrast/100})`);if(fx.saturation!==undefined&&fx.saturation!==0)parts.push(`saturate(${1+fx.saturation/100})`);if(fx.blur!==undefined&&fx.blur!==0)parts.push(`blur(${fx.blur}px)`);return parts.length?parts.join(" "):undefined;})()}}/>
+       <video ref={videoRef} preload="auto" style={{width:"100%",height:"100%",objectFit:"contain",display:clips.some(c=>c.track===0)?"block":"none",filter:(()=>{const fx=selected?.effects;if(!fx)return undefined;const parts:string[]=[];if(fx.brightness!==undefined&&fx.brightness!==0)parts.push(`brightness(${1+fx.brightness/100})`);if(fx.contrast!==undefined&&fx.contrast!==0)parts.push(`contrast(${1+fx.contrast/100})`);if(fx.saturation!==undefined&&fx.saturation!==0)parts.push(`saturate(${1+fx.saturation/100})`);if(fx.blur!==undefined&&fx.blur!==0)parts.push(`blur(${fx.blur}px)`);return parts.length?parts.join(" "):undefined;})()}}/>
       <audio ref={audioRef} style={{display:"none"}} muted={false} />
        {!clips.some(c=>c.track===0)&&(<div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}><span style={{fontSize:36,opacity:0.15}}>▶</span><span style={{fontSize:11,color:"#2d3748"}}>Drag a clip to Video 1 track</span></div>)}
 
