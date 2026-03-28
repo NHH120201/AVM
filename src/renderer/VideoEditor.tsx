@@ -157,6 +157,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ clips: initialClips=[]
  const [exportAudioChannels, setExportAudioChannels] = useState<"stereo" | "mono">("stereo");
  const [exportQuality, setExportQuality] = useState<"draft" | "good" | "high">("good");
  const [exportAdvancedOpen, setExportAdvancedOpen] = useState(false);
+ const [exportResult, setExportResult] = useState<{ ok: boolean; message: string } | null>(null);
  // Audio panel state
 const [whisperLang, setWhisperLang] = useState("auto");
 const [whisperRunning, setWhisperRunning] = useState(false);
@@ -426,7 +427,7 @@ const syncAudioToTime = useCallback((t: number) => {
   };
   const onUp=()=>{
    isDraggingClip.current=false;dragRef.current=null;window.removeEventListener("mousemove",onMove);window.removeEventListener("mouseup",onUp);
-   pushHistory(clips);
+   pushHistory(clipsRef.current);
    setClips(prev=>{
     let updated=prev.map(c=>{if(c.id===id)return{...c,startSec:finalSec};if(partner&&c.id===partner.id)return{...c,startSec:finalSec};return c;});
     const draggedClip=updated.find(c=>c.id===id);if(!draggedClip)return updated;
@@ -555,9 +556,9 @@ const syncAudioToTime = useCallback((t: number) => {
   const rect=tlRef.current.getBoundingClientRect();
   let startSec=Math.max(0,(e.clientX-rect.left+tlRef.current.scrollLeft)/zoom);
   if(snap)startSec=Math.round(startSec*4)/4;
-  pushHistory(clips);
+  pushHistory(clipsRef.current);
   if(trackId===0){
-   const existingVideo=clips.filter(c=>c.track===0);
+   const existingVideo=clipsRef.current.filter(c=>c.track===0);
    if(existingVideo.length){const lastEnd=Math.max(...existingVideo.map(c=>c.startSec+c.durationSec-c.trimStart-c.trimEnd));if(startSec<lastEnd)startSec=lastEnd;}
    const baseDur = typeof clipData.durationSec === "number" && clipData.durationSec > 0 ? clipData.durationSec : 10;
    const videoClip:TimelineClip={id:uid(),path:clipData.path,label:clipData.label,durationSec:baseDur,startSec,trimStart:0,trimEnd:0,track:0,color:clipData.color};
@@ -822,9 +823,8 @@ const handleQwenTts = async () => {
       hasAudio: true,
     }]);
 
-    // 2) Auto-attach as an audio clip on track 1 at timeline start
-    // Compute clip placement position before updating state, using the current ref value
-    // which is always up-to-date (unlike the stale `clips` closure variable).
+    // 2) Auto-attach as an audio clip on track 1 after existing audio clips (or at playhead).
+    // Compute placement using clipsRef so we get the latest state without waiting for React batching.
     const track1ClipsNow = clipsRef.current.filter(c => c.track === 1);
     const clipPlacedAt = track1ClipsNow.length > 0
       ? Math.max(...track1ClipsNow.map(c => c.startSec + c.durationSec - c.trimStart - c.trimEnd))
@@ -832,17 +832,12 @@ const handleQwenTts = async () => {
 
     setClips(prev => {
       const baseDur = durationSec && durationSec > 0 ? durationSec : 10;
-      // Place after existing audio clips on track 1, or at playhead
-      const track1Clips = prev.filter(c => c.track === 1);
-      const startSec = track1Clips.length > 0
-        ? Math.max(...track1Clips.map(c => c.startSec + c.durationSec - c.trimStart - c.trimEnd))
-        : currentTimeRef.current;
       const audioClip: TimelineClip = {
         id: uid(),
         path: outputPath,
         label,
         durationSec: baseDur,
-        startSec,
+        startSec: clipPlacedAt,
         trimStart: 0,
         trimEnd: 0,
         track: 1,
@@ -3000,6 +2995,33 @@ marginBottom: 20,
 </strong>
 </div>
 
+{/* Export result message */}
+{exportResult && (
+  <div style={{
+    padding: "10px 14px",
+    borderRadius: 8,
+    marginBottom: 12,
+    background: exportResult.ok ? "#14532d" : "#450a0a",
+    border: `1px solid ${exportResult.ok ? "#22c55e" : "#ef4444"}`,
+    color: exportResult.ok ? "#86efac" : "#fca5a5",
+    fontSize: 12,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  }}>
+    <span style={{ wordBreak: "break-all" }}>{exportResult.message}</span>
+    {exportResult.ok && exportFolder && (
+      <button
+        onClick={() => { (window as any).api?.openOutputFolder?.(exportFolder); }}
+        style={{ background: "#166534", border: "1px solid #22c55e", color: "#86efac", borderRadius: 6, padding: "3px 10px", fontSize: 11, cursor: "pointer", flexShrink: 0 }}
+      >
+        Open folder
+      </button>
+    )}
+  </div>
+)}
+
 {/* Bottom actions */}
 <div
 style={{
@@ -3011,7 +3033,7 @@ gap: 12,
 <button
 className="secondary"
 disabled={exporting}
-onClick={() => setExportOpen(false)}
+onClick={() => { setExportOpen(false); setExportResult(null); }}
 style={{
 background: "#2a2a2a",
 padding: "10px 20px",
@@ -3021,7 +3043,7 @@ border: "none",
 color: "#fff",
 }}
 >
-Cancel
+{exportResult?.ok ? "Close" : "Cancel"}
 </button>
 <button
 disabled={
@@ -3053,6 +3075,7 @@ exporting ||
 onClick={async () => {
 if (!exportFolder || !clips.some((c) => c.track === 0)) return;
 setExporting(true);
+setExportResult(null);
 
 try {
 const result = await (window as any).api.exportTimeline?.({
@@ -3071,13 +3094,14 @@ elements,
 });
 
 if (result?.outputPath) {
-console.log("[EDITOR EXPORT] Done:", result.outputPath);
+  console.log("[EDITOR EXPORT] Done:", result.outputPath);
+  setExportResult({ ok: true, message: `Saved: ${result.outputPath}` });
 }
 } catch (err: any) {
 console.error("[EDITOR EXPORT ERROR]", err);
+setExportResult({ ok: false, message: `Export failed: ${err?.message || String(err)}` });
 } finally {
 setExporting(false);
-setExportOpen(false);
 }
 }}
 >

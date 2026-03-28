@@ -65,4 +65,7 @@ contextBridge.exposeInMainWorld("api", {
 
   exportTimeline: (params: any) =>
     ipcRenderer.invoke("video:exportTimeline", params),
+
+  openOutputFolder: (folderPath: string) =>
+    ipcRenderer.invoke("shell:openFolder", folderPath),
 });

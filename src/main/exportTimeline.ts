@@ -2,6 +2,16 @@ import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
 
+export interface ClipEffects {
+  brightness?: number;
+  contrast?: number;
+  saturation?: number;
+  blur?: number;
+  vignette?: number;
+  filmGrain?: number;
+  lut?: string;
+}
+
 export interface TimelineClip {
   id: string;
   path: string;
@@ -12,6 +22,11 @@ export interface TimelineClip {
   trimEnd: number;
   track: number; // 0 = Video 1, 1 = Audio 1, others = extra
   color: string;
+  speed?: number;
+  clipVolume?: number;
+  fadeIn?: number;
+  fadeOut?: number;
+  effects?: ClipEffects;
 }
 
 export interface ExportTimelineOptions {
@@ -83,6 +98,11 @@ export async function exportTimeline(opts: ExportTimelineOptions): Promise<{ out
     return { path: c.path, inSec, len, startSec: c.startSec };
   });
 
+  // Ensure output folder exists
+  if (!fs.existsSync(outputFolder)) {
+    fs.mkdirSync(outputFolder, { recursive: true });
+  }
+
   const safeTitle = (title || "export").replace(/[^\w\-]+/g, "_");
   // Always use .mp4 container regardless of source extension; it is compatible with all supported codecs.
   const ext = ".mp4";
@@ -111,6 +131,7 @@ export async function exportTimeline(opts: ExportTimelineOptions): Promise<{ out
   let vCodec = "libx264";
   if (codec === "H.265") vCodec = "libx265";
   else if (codec === "VP9") vCodec = "libvpx-vp9";
+  else if (codec === "AV1") vCodec = "libaom-av1";
 
   const targetFps = fps && String(fps).trim().length ? String(fps).trim() : "29.97";
   const sr = sampleRate === "48000" ? "48000" : "44100";
@@ -140,17 +161,86 @@ export async function exportTimeline(opts: ExportTimelineOptions): Promise<{ out
 
   const audioExtraCount = audioSegments.length;
 
+  // Build per-clip effect filters (brightness/contrast/saturation/blur/fadeIn/fadeOut).
+  // Each video clip may get a pre-processing chain before being fed into concat.
+  const perClipVideoLabels: string[] = [];
+  const perClipAudioLabels: string[] = [];
+  const perClipFilters: string[] = [];
+
+  videoClips.forEach((clip, i) => {
+    const inVLabel = `[${i}:v]`;
+    const inALabel = `[${i}:a]`;
+    const fx = clip.effects ?? {};
+    const clipLen = videoSegments[i].len;
+
+    // Build video effect chain
+    const vFilters: string[] = [];
+
+    // eq= filter for brightness/contrast/saturation
+    const hasBCS = (fx.brightness !== undefined && fx.brightness !== 0) ||
+                   (fx.contrast !== undefined && fx.contrast !== 0) ||
+                   (fx.saturation !== undefined && fx.saturation !== 0);
+    if (hasBCS) {
+      // ffmpeg eq filter: brightness -1..1, contrast 0..2, saturation 0..3
+      const br = fx.brightness !== undefined ? (fx.brightness / 100).toFixed(3) : "0";
+      const co = fx.contrast !== undefined ? (1 + fx.contrast / 100).toFixed(3) : "1";
+      const sa = fx.saturation !== undefined ? (1 + fx.saturation / 100).toFixed(3) : "1";
+      vFilters.push(`eq=brightness=${br}:contrast=${co}:saturation=${sa}`);
+    }
+
+    // blur via unsharp (negative amount = blur)
+    if (fx.blur !== undefined && fx.blur > 0) {
+      const blurAmt = Math.min(fx.blur, 10);
+      vFilters.push(`unsharp=luma_msize_x=5:luma_msize_y=5:luma_amount=${(-blurAmt / 10).toFixed(2)}`);
+    }
+
+    // fadeIn / fadeOut video
+    if (clip.fadeIn !== undefined && clip.fadeIn > 0) {
+      vFilters.push(`fade=t=in:st=0:d=${clip.fadeIn.toFixed(3)}`);
+    }
+    if (clip.fadeOut !== undefined && clip.fadeOut > 0) {
+      const fadeStart = Math.max(0, clipLen - clip.fadeOut);
+      vFilters.push(`fade=t=out:st=${fadeStart.toFixed(3)}:d=${clip.fadeOut.toFixed(3)}`);
+    }
+
+    if (vFilters.length > 0) {
+      const outVLabel = `[vpre${i}]`;
+      perClipFilters.push(`${inVLabel}${vFilters.join(",")}${outVLabel}`);
+      perClipVideoLabels.push(outVLabel);
+    } else {
+      perClipVideoLabels.push(inVLabel);
+    }
+
+    // Audio fadeIn / fadeOut for this clip
+    const aFilters: string[] = [];
+    if (clip.fadeIn !== undefined && clip.fadeIn > 0) {
+      aFilters.push(`afade=t=in:st=0:d=${clip.fadeIn.toFixed(3)}`);
+    }
+    if (clip.fadeOut !== undefined && clip.fadeOut > 0) {
+      const fadeStart = Math.max(0, clipLen - clip.fadeOut);
+      aFilters.push(`afade=t=out:st=${fadeStart.toFixed(3)}:d=${clip.fadeOut.toFixed(3)}`);
+    }
+
+    if (aFilters.length > 0) {
+      const outALabel = `[apre${i}]`;
+      perClipFilters.push(`${inALabel}${aFilters.join(",")}${outALabel}`);
+      perClipAudioLabels.push(outALabel);
+    } else {
+      perClipAudioLabels.push(inALabel);
+    }
+  });
+
   // Build concat filter.
   // FFmpeg concat filter requires n>=2; for a single clip we use null/anull to rename
   // the streams to [vcat][acat] so the rest of the filter graph stays identical.
-  let filter: string;
+  let filter: string = perClipFilters.length > 0 ? perClipFilters.join(";") + ";" : "";
+
   if (videoCount === 1) {
-    filter = `[0:v]null[vcat];[0:a]anull[acat]`;
+    filter += `${perClipVideoLabels[0]}null[vcat];${perClipAudioLabels[0]}anull[acat]`;
   } else {
-    // [0:v][0:a][1:v][1:a]...concat=n=N:v=1:a=1[vcat][acat]
-    // Each video clip on track 0 is expected to have both a video and an audio stream.
-    const concatInputs = Array.from({ length: videoCount }, (_, i) => `[${i}:v][${i}:a]`).join("");
-    filter = `${concatInputs}concat=n=${videoCount}:v=1:a=1[vcat][acat]`;
+    // [v0][a0][v1][a1]...concat=n=N:v=1:a=1[vcat][acat]
+    const concatInputs = perClipVideoLabels.map((v, i) => `${v}${perClipAudioLabels[i]}`).join("");
+    filter += `${concatInputs}concat=n=${videoCount}:v=1:a=1[vcat][acat]`;
   }
 
   // If there are extra audio track segments, delay and mix them on top of [acat]
@@ -267,6 +357,8 @@ export async function exportTimeline(opts: ExportTimelineOptions): Promise<{ out
     videoQualityArgs.push("-crf", String(crf));
   } else if (vCodec === "libvpx-vp9") {
     videoQualityArgs.push("-crf", String(crf), "-b:v", "0");
+  } else if (vCodec === "libaom-av1") {
+    videoQualityArgs.push("-crf", String(crf), "-b:v", "0", "-cpu-used", "4");
   }
 
   ffArgs.push(

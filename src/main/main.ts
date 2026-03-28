@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, screen, dialog } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, screen, dialog, shell } from "electron";
 import fs from "fs";
 import path from "path";
 import { runPipeline } from "./pipeline";
@@ -196,6 +196,12 @@ ipcMain.handle("audio:pickFile", async () => {
   const r = await dialog.showOpenDialog(mainWindow, { title:"Select narration audio", properties:["openFile"], filters:[{name:"Audio",extensions:["wav","mp3","flac","ogg","m4a"]}] });
   return r.canceled||!r.filePaths.length ? null : { path: r.filePaths[0] };
 });
+ipcMain.handle("shell:openFolder", async (_event, folderPath: string) => {
+  if (folderPath && fs.existsSync(folderPath)) {
+    await shell.openPath(folderPath);
+  }
+});
+
 ipcMain.handle("download:pickTargetFolder", async () => {
   if (!mainWindow) return null;
   const r = await dialog.showOpenDialog(mainWindow, { title:"Select download target folder", properties:["openDirectory","createDirectory"] });
